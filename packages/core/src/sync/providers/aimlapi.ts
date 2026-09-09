@@ -22,6 +22,34 @@ const CHAT_COMPLETIONS_TYPE = "openai/chat-completions";
 const EFFORT_VALUES = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "default"] as const;
 const EFFORT_RANK = new Map(EFFORT_VALUES.map((value, index) => [value as string, index]));
 
+/**
+ * Models whose documented schema and whose live behaviour disagree, with what
+ * the endpoint actually served when asked.
+ *
+ * `/docs-json` describes a request *shape* per fallback hop, and a hop can
+ * advertise a control the vendor behind it still refuses. Reading the schema
+ * alone therefore over-states these two, and reading only the first hop
+ * under-states others — neither direction is safe to publish unchecked.
+ *
+ * How these were established, because the method is the evidence: each value
+ * was sent to production with `max_tokens` high enough to leave room for an
+ * answer, and the **error body** was read rather than the status code. A
+ * reasoning model given a small budget returns 400 for an accepted value too
+ * ("max_tokens or model output limit was reached"), so a status-only probe
+ * reports a rejection that never happened. A real refusal says either
+ * "Validation failed" or, for gemini, "Reasoning is mandatory for this
+ * endpoint and cannot be disabled".
+ *
+ * Measured 2026-09-09. Re-probe before trusting these after a vendor change:
+ * an entry that has become wrong is worse than no entry.
+ */
+const MEASURED_EFFORTS: Readonly<Record<string, readonly string[]>> = {
+  // schema offers none+minimal; both refused, `none` explicitly and by name
+  "google/gemini-3.7-flash": ["low", "medium", "high", "max"],
+  // schema offers none; refused as a validation error
+  "google/gemini-3.6-flash": ["minimal", "low", "medium", "high", "max"],
+};
+
 const DOCS_CONCURRENCY = 8;
 
 const PricingUnit = z
@@ -185,6 +213,9 @@ async function fetchReasoningEffort(id: string): Promise<string[] | undefined> {
   } catch {
     return undefined;
   }
+
+  const measured = MEASURED_EFFORTS[id];
+  if (measured) return [...measured];
 
   const found = new Set<string>();
   collectReasoningEffortEnums(payload, found);
