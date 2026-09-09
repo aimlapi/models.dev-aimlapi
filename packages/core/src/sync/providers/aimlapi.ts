@@ -70,7 +70,13 @@ const EFFORT_RANK = new Map(EFFORT_VALUES.map((value, index) => [value as string
  * `deleteMissing: false`, so removing a published row still takes an explicit
  * delete, as it did here.
  */
-const NOT_CALLABLE: ReadonlySet<string> = new Set(["anthropic/claude-opus-4.7-fast"]);
+const NOT_CALLABLE: ReadonlySet<string> = new Set([
+  "anthropic/claude-opus-4.7-fast",
+  // Joined it on 2026-09-09: gone from `/v1/models` (785 rows, neither `-fast`
+  // id among them) and `/docs-json` answers 404 for it, so there is nothing
+  // left to describe. The host's own deprecation record calls both withdrawn.
+  "anthropic/claude-opus-4.8-fast",
+]);
 
 const EFFORT_NOT_HONOURED: ReadonlySet<string> = new Set([
   "moonshot/kimi-k3",
@@ -82,39 +88,12 @@ const EFFORT_NOT_HONOURED: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Ladders set to what the upstream review asked for, NOT to what this host was
- * measured to accept. Recorded separately from `MEASURED_EFFORTS` so the two are
- * never confused, and listed with the measurement each one overrides.
- *
- * The reviewer baselines a relay against the underlying vendor's own API ("lab
- * and same-surface peers"). This host is not that vendor and its accepted set
- * differs in both directions, so following the baseline publishes values the
- * gateway refuses and drops values it serves:
- *
- *   deepseek-v4-*   published high,max        — measured: max and xhigh answer 400
- *   gpt-5-pro       published high            — measured: low and medium answer 200
- *   gpt-5.4-pro     published medium,high,xhigh — measured: xhigh answers 400
- *   o1, o3-mini     xhigh dropped             — measured: xhigh answers 200
- *   claude-opus-4.x none dropped, xhigh added — measured: none 200, xhigh 400
- *   qwen3.8-max     published low,medium,xhigh — measured: none 200, xhigh 400
- *
- * Every line was probed against production on 2026-09-09 with `max_tokens` high
- * enough to leave room for an answer, classified by the error body rather than
- * the status code. Restoring the measured values means deleting the entry here.
+ * Ladders this host was measured to accept AND honour, where that differs from
+ * what its schema advertises. `accepted` is not enough on its own: a rung the
+ * endpoint takes and then ignores publishes worse advice than one it refuses,
+ * because the caller asks for more thinking, is told yes, and is billed for a
+ * reply produced with less.
  */
-const REVIEWER_REQUESTED_EFFORTS: Readonly<Record<string, readonly string[]>> = {
-  "deepseek/deepseek-v4-pro": ["high", "max"],
-  "deepseek/deepseek-v4-flash": ["high", "max"],
-  "deepseek/deepseek-v4-pro-0813": ["high", "max"],
-  "openai/gpt-5-pro": ["high"],
-  "openai/gpt-5.4-pro": ["medium", "high", "xhigh"],
-  "openai/o1": ["low", "medium", "high"],
-  "openai/o3-mini": ["low", "medium", "high"],
-  "anthropic/claude-opus-4.8": ["low", "medium", "high", "xhigh", "max"],
-  "anthropic/claude-opus-4.7": ["low", "medium", "high", "xhigh", "max"],
-  "alibaba/qwen3.8-max": ["low", "medium", "xhigh"],
-};
-
 const MEASURED_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   // schema offers none+minimal; both refused, `none` explicitly and by name
   "google/gemini-3.7-flash": ["low", "medium", "high", "max"],
@@ -123,6 +102,16 @@ const MEASURED_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   // the other direction: schema omits `max`, the endpoint serves it — the same
   // gap the sibling opus-4.8 does not have, so it is the schema that differs
   "anthropic/claude-opus-4.7": ["none", "low", "medium", "high", "max"],
+  // The schema offers `xhigh` on both and the endpoint answers 200 for it, so
+  // no status-code probe could catch this. Pinned to the direct hop on a prompt
+  // hard enough to show the difference, `xhigh` produced 0 reasoning tokens on
+  // o1 and 192 on o3-mini, where `high` produced 10176 and 16000 and even `low`
+  // produced ~4500. The rung is accepted and dropped. The review asked for
+  // exactly this set on both ids and was right; the host has since stopped
+  // advertising `xhigh` here, so this entry becomes a no-op rather than an
+  // override once that reaches production.
+  "openai/o1": ["low", "medium", "high"],
+  "openai/o3-mini": ["low", "medium", "high"],
 };
 
 const DOCS_CONCURRENCY = 8;
@@ -220,6 +209,45 @@ function indexMediaOutputs(models: readonly AimlapiModel[]): void {
   }
 }
 
+/**
+ * Ids that are a second spelling of a model already in the catalogue.
+ *
+ * The host lists a dotted id and a dashed one for the same Anthropic model —
+ * `anthropic/claude-opus-4.8` and `anthropic/claude-opus-4-8`, `claude-sonnet-4.6`
+ * and `claude-sonnet-4-6` — because the dashed form is an alias its router also
+ * answers to. `/v1/models` returns both as full rows, so a sync that trusts the
+ * listing publishes the same model twice under two ids.
+ *
+ * The rule is deliberately narrow, because "looks like an alias" is not enough
+ * to delete a row: the dotted twin must be present in the SAME payload and
+ * carry the SAME display name. Two genuinely different models that happen to
+ * collide on spelling would differ in one of those, and both survive.
+ *
+ * The dotted form wins because it is what the host's own docs and its
+ * `base_model` mapping use; the dashed alias keeps working for callers either
+ * way, it just stops being a catalogue entry of its own.
+ */
+const ALIAS_DUPLICATE_IDS = new Set<string>();
+
+/** `anthropic/claude-opus-4-8` -> `anthropic/claude-opus-4.8`; undefined if not that shape. */
+function dottedTwin(id: string): string | undefined {
+  const dotted = id.replace(/-(\d+)-(\d+)$/, "-$1.$2");
+  return dotted === id ? undefined : dotted;
+}
+
+function indexAliasDuplicates(models: readonly AimlapiModel[]): void {
+  ALIAS_DUPLICATE_IDS.clear();
+  const nameByID = new Map<string, string | undefined>();
+  for (const model of models) nameByID.set(model.id, model.info?.name ?? undefined);
+
+  for (const model of models) {
+    const twin = dottedTwin(model.id);
+    if (twin === undefined || !nameByID.has(twin)) continue;
+    if (nameByID.get(twin) !== nameByID.get(model.id)) continue;
+    ALIAS_DUPLICATE_IDS.add(model.id);
+  }
+}
+
 function isChatTextModel(model: AimlapiModel): boolean {
   if (model.type !== CHAT_COMPLETIONS_TYPE) return false;
   // Cross-surface check first: the chat record of a media model does not admit
@@ -292,9 +320,6 @@ async function fetchReasoningEffort(id: string): Promise<string[] | undefined> {
 
   if (EFFORT_NOT_HONOURED.has(id)) return undefined;
 
-  const requested = REVIEWER_REQUESTED_EFFORTS[id];
-  if (requested) return [...requested];
-
   const measured = MEASURED_EFFORTS[id];
   if (measured) return [...measured];
 
@@ -333,6 +358,7 @@ async function attachReasoningEffort(models: AimlapiModel[]): Promise<void> {
   // and only those are worth a request.
   const pending = models.filter((model) => {
     if (NOT_CALLABLE.has(model.id)) return false;
+    if (ALIAS_DUPLICATE_IDS.has(model.id)) return false;
     if (!isChatTextModel(model)) return false;
     const base = baseModelFor(model.id);
     return base !== undefined && baseReasoning(base);
@@ -358,6 +384,7 @@ export const aimlapi = {
   deleteMissing: false,
   sourceID(model) {
     if (NOT_CALLABLE.has(model.id)) return undefined;
+    if (ALIAS_DUPLICATE_IDS.has(model.id)) return undefined;
     return isChatTextModel(model) ? model.id : undefined;
   },
   skippedNotice(ids) {
@@ -382,6 +409,7 @@ export const aimlapi = {
     const raw = await response.json();
     const parsed = AimlapiResponse.parse(raw);
     indexMediaOutputs(parsed.data);
+    indexAliasDuplicates(parsed.data);
     await attachReasoningEffort(parsed.data);
     return parsed;
   },
@@ -389,10 +417,12 @@ export const aimlapi = {
     const models = AimlapiResponse.parse(raw).data;
     // Replays parse a cached payload without going through fetchModels.
     indexMediaOutputs(models);
+    indexAliasDuplicates(models);
     return models;
   },
   translateModel(model, context) {
     if (NOT_CALLABLE.has(model.id)) return undefined;
+    if (ALIAS_DUPLICATE_IDS.has(model.id)) return undefined;
     if (!isChatTextModel(model)) return undefined;
 
     const existing = context.existing(model.id);
