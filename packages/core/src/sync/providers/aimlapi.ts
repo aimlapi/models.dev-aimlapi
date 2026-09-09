@@ -43,6 +43,28 @@ const EFFORT_RANK = new Map(EFFORT_VALUES.map((value, index) => [value as string
  * Measured 2026-09-09. Re-probe before trusting these after a vendor change:
  * an entry that has become wrong is worse than no entry.
  */
+/**
+ * Models that accept any string in `reasoning_effort` — `banana` and `zzz9` both
+ * return 200 — so the parameter is not honoured and no ladder can be established
+ * by probing. The schema still lists one, inherited from the family template.
+ *
+ * Publishing it would state a control the caller does not have. Emitting nothing
+ * says only that we cannot describe it, which is the truth. Re-probe with a
+ * deliberately invalid value before adding a ladder back: a 400 means the field
+ * became real.
+ *
+ * Measured 2026-09-09 across all 87 entries that carry reasoning options; these
+ * six were the only ones that failed the check.
+ */
+const EFFORT_NOT_HONOURED: ReadonlySet<string> = new Set([
+  "moonshot/kimi-k3",
+  "google/gemini-3.1-pro-preview",
+  "google/gemma-4-26b-a4b-it",
+  "z-ai/glm-5v-turbo",
+  "z-ai/glm-5-turbo",
+  "alibaba/qwen-plus",
+]);
+
 const MEASURED_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   // schema offers none+minimal; both refused, `none` explicitly and by name
   "google/gemini-3.7-flash": ["low", "medium", "high", "max"],
@@ -217,6 +239,8 @@ async function fetchReasoningEffort(id: string): Promise<string[] | undefined> {
     return undefined;
   }
 
+  if (EFFORT_NOT_HONOURED.has(id)) return undefined;
+
   const measured = MEASURED_EFFORTS[id];
   if (measured) return [...measured];
 
@@ -329,9 +353,16 @@ export const aimlapi = {
     // is skipped rather than given an invented control.
     let reasoningOptions: Array<{ type: "effort"; values: string[] }> | undefined;
     if (baseReasoning(base)) {
-      const values = model.reasoningEffort ?? undefined;
-      if (values === undefined || values.length === 0) return undefined;
-      reasoningOptions = [{ type: "effort", values }];
+      // A model that reasons but honours no caller control gets an empty list:
+      // the schema requires the field, and an empty one states the truth —
+      // reasoning happens, nothing about it is selectable.
+      if (EFFORT_NOT_HONOURED.has(model.id)) {
+        reasoningOptions = [];
+      } else {
+        const values = model.reasoningEffort ?? undefined;
+        if (values === undefined || values.length === 0) return undefined;
+        reasoningOptions = [{ type: "effort", values }];
+      }
     }
 
     const units = model.pricing?.units ?? [];

@@ -1,8 +1,5 @@
 base_model = "zhipuai/glm-5v-turbo"
-
-[[reasoning_options]]
-type = "effort"
-values = ["none", "minimal", "low", "medium", "high"]
+reasoning_options = []
 
 [cost]
 input = 1.56
