@@ -48,6 +48,9 @@ const MEASURED_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "google/gemini-3.7-flash": ["low", "medium", "high", "max"],
   // schema offers none; refused as a validation error
   "google/gemini-3.6-flash": ["minimal", "low", "medium", "high", "max"],
+  // the other direction: schema omits `max`, the endpoint serves it — the same
+  // gap the sibling opus-4.8 does not have, so it is the schema that differs
+  "anthropic/claude-opus-4.7": ["none", "low", "medium", "high", "max"],
 };
 
 const DOCS_CONCURRENCY = 8;
