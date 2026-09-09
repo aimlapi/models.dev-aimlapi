@@ -56,6 +56,17 @@ const EFFORT_RANK = new Map(EFFORT_VALUES.map((value, index) => [value as string
  * Measured 2026-09-09 across all 87 entries that carry reasoning options; these
  * six were the only ones that failed the check.
  */
+/**
+ * Catalogue rows that cannot actually be called: `/v1/models` lists them with a
+ * name and prices, inference answers 404 "No endpoints found". Publishing one
+ * hands a reader a model id that fails on first use.
+ *
+ * Measured 2026-09-09; the sibling `-fast` and `-pro` aliases all answered 200,
+ * so this is one broken row rather than a broken family. Re-check before adding
+ * to this list — a row that starts working should come back.
+ */
+const NOT_CALLABLE: ReadonlySet<string> = new Set(["anthropic/claude-opus-4.7-fast"]);
+
 const EFFORT_NOT_HONOURED: ReadonlySet<string> = new Set([
   "moonshot/kimi-k3",
   "google/gemini-3.1-pro-preview",
@@ -279,6 +290,7 @@ async function attachReasoningEffort(models: AimlapiModel[]): Promise<void> {
   // Only models whose lab entry says they reason need the control documented,
   // and only those are worth a request.
   const pending = models.filter((model) => {
+    if (NOT_CALLABLE.has(model.id)) return false;
     if (!isChatTextModel(model)) return false;
     const base = baseModelFor(model.id);
     return base !== undefined && baseReasoning(base);
