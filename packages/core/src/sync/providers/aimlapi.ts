@@ -16,9 +16,11 @@ const DOCS_ENDPOINT = "https://api.aimlapi.com/docs-json";
 // chat model and, say, an image model. Only the chat surface belongs here.
 const CHAT_COMPLETIONS_TYPE = "openai/chat-completions";
 
-// Values this schema accepts for an "effort" reasoning control. Anything the
-// API documents outside this set is dropped rather than coerced.
-const EFFORT_VALUES = new Set(["none", "minimal", "low", "medium", "high", "xhigh", "max", "default"]);
+// Values this schema accepts for an "effort" reasoning control, in the order a
+// reader expects to see them. Anything the API documents outside this set is
+// dropped rather than coerced.
+const EFFORT_VALUES = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "default"] as const;
+const EFFORT_RANK = new Map(EFFORT_VALUES.map((value, index) => [value as string, index]));
 
 const DOCS_CONCURRENCY = 8;
 
@@ -161,9 +163,17 @@ function positive(value: number | null | undefined): number | undefined {
 }
 
 /**
- * Reads the documented `reasoning_effort` enum for one model. Returns undefined
- * when the docs do not describe the control, which is treated as "cannot state
- * it" rather than "the model has none".
+ * Reads the documented `reasoning_effort` values for one model. Returns
+ * undefined when the docs do not describe the control, which is treated as
+ * "cannot state it" rather than "the model has none".
+ *
+ * One model's schema can carry the control more than once, because the request
+ * body is a union of per-family variants and several of them accept it with
+ * different ladders. Taking the first one found means taking whichever variant
+ * happens to be earliest in the document, which drops real values: at the time
+ * of writing that costs `minimal` on the gpt-5 family, `max` on claude-sonnet-4.6
+ * and claude-opus-4.8, and `none` on the gemini flash models. The union across
+ * every occurrence is what the endpoint actually accepts.
  */
 async function fetchReasoningEffort(id: string): Promise<string[] | undefined> {
   const url = `${DOCS_ENDPOINT}?model=${encodeURIComponent(id)}&endpoint=${encodeURIComponent(CHAT_COMPLETIONS_TYPE)}`;
@@ -176,37 +186,34 @@ async function fetchReasoningEffort(id: string): Promise<string[] | undefined> {
     return undefined;
   }
 
-  const found = findReasoningEffortEnum(payload);
-  if (found === undefined) return undefined;
+  const found = new Set<string>();
+  collectReasoningEffortEnums(payload, found);
 
-  const values = found.filter((value) => EFFORT_VALUES.has(value));
+  const values = [...found]
+    .filter((value) => EFFORT_RANK.has(value))
+    .sort((a, b) => EFFORT_RANK.get(a)! - EFFORT_RANK.get(b)!);
   return values.length > 0 ? values : undefined;
 }
 
-function findReasoningEffortEnum(node: unknown): string[] | undefined {
+function collectReasoningEffortEnums(node: unknown, into: Set<string>): void {
   if (Array.isArray(node)) {
-    for (const item of node) {
-      const found = findReasoningEffortEnum(item);
-      if (found !== undefined) return found;
-    }
-    return undefined;
+    for (const item of node) collectReasoningEffortEnums(item, into);
+    return;
   }
-  if (node === null || typeof node !== "object") return undefined;
+  if (node === null || typeof node !== "object") return;
 
   const record = node as Record<string, unknown>;
   const effort = record["reasoning_effort"];
   if (effort !== null && typeof effort === "object") {
     const values = (effort as Record<string, unknown>)["enum"];
     if (Array.isArray(values) && values.every((value) => typeof value === "string")) {
-      return values as string[];
+      for (const value of values as string[]) into.add(value);
     }
   }
 
-  for (const value of Object.values(record)) {
-    const found = findReasoningEffortEnum(value);
-    if (found !== undefined) return found;
-  }
-  return undefined;
+  // Keep walking either way: the same schema can describe the control again in
+  // a sibling variant of the request-body union.
+  for (const value of Object.values(record)) collectReasoningEffortEnums(value, into);
 }
 
 async function attachReasoningEffort(models: AimlapiModel[]): Promise<void> {

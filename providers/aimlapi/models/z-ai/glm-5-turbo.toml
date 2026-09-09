@@ -1,0 +1,13 @@
+base_model = "zhipuai/glm-5-turbo"
+
+[[reasoning_options]]
+type = "effort"
+values = ["none", "minimal", "low", "medium", "high"]
+
+[cost]
+input = 1.56
+output = 5.2
+cache_read = 0.312
+
+[limit]
+context = 262_144
