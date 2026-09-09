@@ -1,4 +1,5 @@
 base_model = "google/gemma-4-31b-it"
+name = "Gemma 4 31B Instruct"
 
 [[reasoning_options]]
 type = "effort"

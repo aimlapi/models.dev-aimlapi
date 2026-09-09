@@ -89,6 +89,7 @@ const PricingUnit = z
 
 const Info = z
   .object({
+    name: z.string().nullish(),
     contextLength: z.number().int().nonnegative().nullish(),
     outputMax: z.number().int().nonnegative().nullish(),
   })
@@ -391,6 +392,11 @@ export const aimlapi = {
             output: perMillion(units, "generated") ?? existing?.cost?.output,
             cache_read: perMillion(units, "cached") ?? existing?.cost?.cache_read,
           },
+          // Aliases such as `-pro` and `-fast` factor onto the base model and
+          // would inherit its display name, so the catalogue would list two rows
+          // called "GPT-5.6 Luna". The host names them apart; carry that through
+          // and the override drops itself when the names already agree.
+          name: info.name ?? undefined,
           reasoning_options: reasoningOptions,
           limit,
         },

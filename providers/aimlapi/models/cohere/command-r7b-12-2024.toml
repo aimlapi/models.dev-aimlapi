@@ -1,4 +1,5 @@
 base_model = "cohere/command-r7b-12-2024"
+name = "Command R7B (12-2024)"
 
 [cost]
 input = 0.0515775

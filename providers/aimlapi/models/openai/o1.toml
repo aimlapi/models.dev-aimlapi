@@ -1,4 +1,5 @@
 base_model = "openai/o1"
+name = "o1 Preview"
 
 [[reasoning_options]]
 type = "effort"

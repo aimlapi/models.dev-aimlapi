@@ -1,4 +1,5 @@
 base_model = "mistral/mistral-small-2603"
+name = "Small 4"
 
 [[reasoning_options]]
 type = "effort"

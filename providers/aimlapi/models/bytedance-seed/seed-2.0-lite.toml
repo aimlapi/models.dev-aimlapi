@@ -1,4 +1,5 @@
 base_model = "bytedance-seed/seed-2.0-lite"
+name = "Seed-2.0-Lite"
 
 [[reasoning_options]]
 type = "effort"

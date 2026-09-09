@@ -1,4 +1,5 @@
 base_model = "alibaba/qwen3-max"
+name = "Qwen3 Max Instruct"
 
 [cost]
 input = 1.56
