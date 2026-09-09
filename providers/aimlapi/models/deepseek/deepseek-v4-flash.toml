@@ -2,7 +2,7 @@ base_model = "deepseek/deepseek-v4-flash"
 
 [[reasoning_options]]
 type = "effort"
-values = ["none", "low", "medium", "high"]
+values = ["high", "max"]
 
 [cost]
 input = 0.182

@@ -3,7 +3,7 @@ name = "o1 Preview"
 
 [[reasoning_options]]
 type = "effort"
-values = ["low", "medium", "high", "xhigh"]
+values = ["low", "medium", "high"]
 
 [cost]
 input = 19.5

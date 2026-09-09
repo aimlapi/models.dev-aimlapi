@@ -81,6 +81,40 @@ const EFFORT_NOT_HONOURED: ReadonlySet<string> = new Set([
   "alibaba/qwen-plus",
 ]);
 
+/**
+ * Ladders set to what the upstream review asked for, NOT to what this host was
+ * measured to accept. Recorded separately from `MEASURED_EFFORTS` so the two are
+ * never confused, and listed with the measurement each one overrides.
+ *
+ * The reviewer baselines a relay against the underlying vendor's own API ("lab
+ * and same-surface peers"). This host is not that vendor and its accepted set
+ * differs in both directions, so following the baseline publishes values the
+ * gateway refuses and drops values it serves:
+ *
+ *   deepseek-v4-*   published high,max        — measured: max and xhigh answer 400
+ *   gpt-5-pro       published high            — measured: low and medium answer 200
+ *   gpt-5.4-pro     published medium,high,xhigh — measured: xhigh answers 400
+ *   o1, o3-mini     xhigh dropped             — measured: xhigh answers 200
+ *   claude-opus-4.x none dropped, xhigh added — measured: none 200, xhigh 400
+ *   qwen3.8-max     published low,medium,xhigh — measured: none 200, xhigh 400
+ *
+ * Every line was probed against production on 2026-09-09 with `max_tokens` high
+ * enough to leave room for an answer, classified by the error body rather than
+ * the status code. Restoring the measured values means deleting the entry here.
+ */
+const REVIEWER_REQUESTED_EFFORTS: Readonly<Record<string, readonly string[]>> = {
+  "deepseek/deepseek-v4-pro": ["high", "max"],
+  "deepseek/deepseek-v4-flash": ["high", "max"],
+  "deepseek/deepseek-v4-pro-0813": ["high", "max"],
+  "openai/gpt-5-pro": ["high"],
+  "openai/gpt-5.4-pro": ["medium", "high", "xhigh"],
+  "openai/o1": ["low", "medium", "high"],
+  "openai/o3-mini": ["low", "medium", "high"],
+  "anthropic/claude-opus-4.8": ["low", "medium", "high", "xhigh", "max"],
+  "anthropic/claude-opus-4.7": ["low", "medium", "high", "xhigh", "max"],
+  "alibaba/qwen3.8-max": ["low", "medium", "xhigh"],
+};
+
 const MEASURED_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   // schema offers none+minimal; both refused, `none` explicitly and by name
   "google/gemini-3.7-flash": ["low", "medium", "high", "max"],
@@ -257,6 +291,9 @@ async function fetchReasoningEffort(id: string): Promise<string[] | undefined> {
   }
 
   if (EFFORT_NOT_HONOURED.has(id)) return undefined;
+
+  const requested = REVIEWER_REQUESTED_EFFORTS[id];
+  if (requested) return [...requested];
 
   const measured = MEASURED_EFFORTS[id];
   if (measured) return [...measured];
