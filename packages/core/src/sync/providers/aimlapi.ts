@@ -64,6 +64,11 @@ const EFFORT_RANK = new Map(EFFORT_VALUES.map((value, index) => [value as string
  * Measured 2026-09-09; the sibling `-fast` and `-pro` aliases all answered 200,
  * so this is one broken row rather than a broken family. Re-check before adding
  * to this list — a row that starts working should come back.
+ *
+ * The guard sits on the publish path, so the entry is never created or updated.
+ * It does not delete a file that is already on disk: this sync runs with
+ * `deleteMissing: false`, so removing a published row still takes an explicit
+ * delete, as it did here.
  */
 const NOT_CALLABLE: ReadonlySet<string> = new Set(["anthropic/claude-opus-4.7-fast"]);
 
@@ -315,6 +320,7 @@ export const aimlapi = {
   // a local model missing from one response is not proof that it is gone.
   deleteMissing: false,
   sourceID(model) {
+    if (NOT_CALLABLE.has(model.id)) return undefined;
     return isChatTextModel(model) ? model.id : undefined;
   },
   skippedNotice(ids) {
@@ -349,6 +355,7 @@ export const aimlapi = {
     return models;
   },
   translateModel(model, context) {
+    if (NOT_CALLABLE.has(model.id)) return undefined;
     if (!isChatTextModel(model)) return undefined;
 
     const existing = context.existing(model.id);
