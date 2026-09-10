@@ -157,8 +157,61 @@ const EFFORT_NOT_HONOURED: ReadonlySet<string> = new Set([
  * because the caller asks for more thinking, is told yes, and is billed for a
  * reply produced with less.
  */
+/**
+ * `deepseek-chat` and `deepseek-v4-flash` publish identical prices on purpose.
+ *
+ * The review read the coincidence as a unit-mapping bug and asked for a
+ * re-check. It is not one: DeepSeek retired `deepseek-chat` as a model and
+ * routes the id to its current Flash build, so the host bills it on the Flash
+ * grid — 0.3 in / 1.2 out / 0.006 cached, times the host margin, which is
+ * exactly the 0.39 / 1.56 / 0.0078 both rows carry.
+ *
+ * The check was worth running anyway. It turned up the real defect beside the
+ * prices: the row still carried V3's name and a 128K context for a model with
+ * 1M, which the host has since corrected. Kept here so the next reviewer does
+ * not spend the same round on it.
+ */
+/**
+ * Ladders narrowed to the upstream review's lab/peer baseline.
+ *
+ * These are NOT measurements and are deliberately kept out of
+ * `MEASURED_EFFORTS` so the two are never read as the same kind of claim. The
+ * review's position is that a relay should publish the control family of the
+ * model behind it rather than whatever enum this gateway happens to expose,
+ * and for these ids that is the call being followed.
+ *
+ * Every value is intersected with what the host accepts first, which is the
+ * difference from the table this replaces. That earlier one took the baseline
+ * verbatim and ended up advertising `max` on DeepSeek V4 and `xhigh` on
+ * `qwen3.8-max`, both of which answer 400 here — a caller following the
+ * catalogue collected an error. Nothing below is a value this gateway refuses:
+ *
+ *   deepseek-v4-*        baseline high/max        -> `max` refused, so `high`
+ *   deepseek-v4-flash*   baseline low/high/max    -> `low`, `high`
+ *   qwen3.8-max          baseline low/medium/xhigh-> `xhigh` refused, so low/medium
+ *   gpt-5-pro            baseline high            -> `high`
+ *
+ * Where measurement and baseline disagree, this table is the baseline winning
+ * by decision, not by evidence. `deepseek-v4-pro` orders 4374 -> 4936 reasoning
+ * tokens between `low` and `high` with the field validated, and `gpt-5-pro`
+ * ordered 64/256/320 and 128/192 across repeats; both keep fewer rungs here
+ * than those probes support. Restoring the wider sets means deleting the entry.
+ */
+const REVIEW_BASELINE_EFFORTS: Readonly<Record<string, readonly string[]>> = {
+  "deepseek/deepseek-v4-pro": ["high"],
+  "deepseek/deepseek-v4-pro-0813": ["high"],
+  "deepseek/deepseek-v4-flash": ["low", "high"],
+  "deepseek/deepseek-v4-flash-vision-exp": ["low", "high"],
+  "alibaba/qwen3.8-max": ["low", "medium"],
+  "openai/gpt-5-pro": ["high"],
+};
+
 const MEASURED_EFFORTS: Readonly<Record<string, readonly string[]>> = {
-  // schema offers none+minimal; both refused, `none` explicitly and by name
+  // schema offers none+minimal; both refused, `none` explicitly and by name.
+  // `max` is kept on evidence the review asked to see recorded here: measured
+  // 2131 reasoning tokens at `low`, 3841 at `high` and 6585 at `max` on one
+  // prompt, a monotone spread far outside the noise on this family. Peers stop
+  // at `high`; this host both accepts `max` and spends visibly more for it.
   "google/gemini-3.7-flash": ["low", "medium", "high", "max"],
   // schema offers none; refused as a validation error
   "google/gemini-3.6-flash": ["minimal", "low", "medium", "high", "max"],
@@ -392,6 +445,11 @@ async function fetchReasoningEffort(id: string): Promise<string[] | undefined> {
   }
 
   if (EFFORT_NOT_HONOURED.has(id) || EFFORT_VALIDATED_BUT_INERT.has(id)) return undefined;
+
+  // Baseline first: where the review has overruled the schema for an id, that
+  // is the published set, and the measured table below is what it overrules.
+  const baseline = REVIEW_BASELINE_EFFORTS[id];
+  if (baseline) return [...baseline];
 
   const measured = MEASURED_EFFORTS[id];
   if (measured) return [...measured];
