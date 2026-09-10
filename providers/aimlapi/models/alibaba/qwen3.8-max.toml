@@ -2,7 +2,7 @@ base_model = "alibaba/qwen3.8-max"
 
 [[reasoning_options]]
 type = "effort"
-values = ["low", "medium"]
+values = ["none", "low", "medium", "high"]
 
 [cost]
 input = 2.6

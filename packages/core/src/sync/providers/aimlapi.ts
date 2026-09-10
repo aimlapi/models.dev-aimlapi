@@ -191,14 +191,27 @@ const EFFORT_NOT_HONOURED: ReadonlySet<string> = new Set([
  *   qwen3.8-max          baseline low/medium/xhigh-> `xhigh` refused, so low/medium
  *   gpt-5-pro            baseline high            -> `high`
  *
+ * `alibaba/qwen3.8-max` left too, and for the reason the review gave: the
+ * forced `low, medium` dropped `high` without ever measuring a rejection of
+ * it, and `high` answers 200 here and spends its whole budget reasoning. A
+ * rung that works is not ours to remove. Whether the rungs ORDER is still
+ * unmeasurable — the model exhausts a 4000-token budget on reasoning and
+ * times out at 12000 — and `xhigh`, the lab's top rung, answers 400. So the
+ * id goes back to the host's own enum, which is the only statement anyone can
+ * actually stand behind for it.
+ *
  * The DeepSeek V4 family was here and is not any more. The review asked for
  * the lab set, this table gave it, and the next round objected that doing so
  * "removes caller off/lower rungs that the host reportedly accepted" — which
  * is what the entry's own note had said it cost. Re-probed on that objection:
  * an invalid value is rejected, `none` returns 0 reasoning tokens twice over,
- * `low` returns 4175 and `high` 5662. That is an ordered ladder with a working
- * off path, so the ids go back to the host's own set and the baseline no
- * longer overrides them.
+ * `low` returns 4175, `medium` 5563 and `high` 5662. Four rungs, in order,
+ * with a working off path — the "invented GPT-style ladder" the review keeps
+ * naming is the one this host measurably has. `medium` was the last untested
+ * rung and was probed on the review's own objection to keeping it.
+ *
+ * So the ids go back to the host's own set and the baseline no longer
+ * overrides them.
  *
  * Where measurement and baseline disagree, this table is the baseline winning
  * by decision, not by evidence. `deepseek-v4-pro` orders 4374 -> 4936 reasoning
@@ -207,7 +220,6 @@ const EFFORT_NOT_HONOURED: ReadonlySet<string> = new Set([
  * than those probes support. Restoring the wider sets means deleting the entry.
  */
 const REVIEW_BASELINE_EFFORTS: Readonly<Record<string, readonly string[]>> = {
-  "alibaba/qwen3.8-max": ["low", "medium"],
   "openai/gpt-5-pro": ["high"],
 };
 
@@ -268,6 +280,14 @@ const MEASURED_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   // the measurement is what this entry rests on. `xhigh` is not added back —
   // this host's schema stops at `high` and refuses it.
   "openai/gpt-5.4-pro": ["medium", "high"],
+  // `none` dropped 2026-09-10. On this id every rung reaches Anthropic
+  // natively, and Anthropic has no off switch on its adaptive models, so the
+  // host maps `none` to `low` — the cheapest real rung. Publishing it as
+  // `none` tells a caller reading the catalogue that reasoning can be turned
+  // off here, which is not what they would get. The sibling opus-4.7/4.8 keep
+  // `none` because their lower rungs reach OpenRouter, where it measured 0
+  // reasoning tokens against 191 at `low`: there it really is off.
+  "anthropic/claude-sonnet-5": ["low", "medium", "high", "xhigh", "max"],
   "openai/o1": ["low", "medium", "high"],
   "openai/o3-mini": ["low", "medium", "high"],
 };
@@ -433,15 +453,17 @@ function isChatTextModel(model: AimlapiModel): boolean {
  * and limits; this is the same correction on the catalogue side.
  */
 /**
- * Ids whose host label is known stale, so the lab name is the better one.
+ * Ids whose host ROW is known stale, so the lab entry is the better source.
  *
  * Only `deepseek/deepseek-chat`, and only until the host's own correction
- * ships: production still calls it "DeepSeek V3" while serving a Flash build,
- * and republishing that beside a Flash `base_model` would put a contradiction
- * in the catalogue. The fix upstream is merged, and when it lands this set can
- * go — the host will be saying the right thing itself.
+ * ships: production still calls it "DeepSeek V3" with a 128K window while
+ * serving a Flash build that has 1M, and republishing either beside a Flash
+ * `base_model` would put a contradiction in the catalogue. Name and limits are
+ * both suppressed so the lab entry's own figures inherit. The fix upstream is
+ * merged, and when it lands this set can go — the host will be saying the
+ * right thing itself.
  */
-const SUPPRESS_HOST_NAME: ReadonlySet<string> = new Set([
+const STALE_HOST_ROW: ReadonlySet<string> = new Set([
   "deepseek/deepseek-chat",
 ]);
 
@@ -656,7 +678,8 @@ export const aimlapi = {
     // context would overwrite the lab's correct split (e.g. 272k in + 128k out
     // within a 400k window) with a wrong number.
     const limit =
-      contextLimit === undefined && outputLimit === undefined
+      STALE_HOST_ROW.has(model.id) ||
+      (contextLimit === undefined && outputLimit === undefined)
         ? undefined
         : { context: contextLimit, output: outputLimit };
 
@@ -677,7 +700,7 @@ export const aimlapi = {
           // would inherit its display name, so the catalogue would list two rows
           // called "GPT-5.6 Luna". The host names them apart; carry that through
           // and the override drops itself when the names already agree.
-          name: SUPPRESS_HOST_NAME.has(model.id) ? undefined : (info.name ?? undefined),
+          name: STALE_HOST_ROW.has(model.id) ? undefined : (info.name ?? undefined),
           reasoning_options: reasoningOptions,
           limit,
         },
