@@ -107,11 +107,42 @@ const NOT_CALLABLE: ReadonlySet<string> = new Set([
  *
  * Publishing a ladder here would sell a dial that turns nothing.
  */
+/**
+ * ## Why this file reads `reasoning_effort` and nothing else
+ *
+ * The review asks repeatedly for `toggle` and `budget_tokens` options, on the
+ * grounds that the labs behind these models expose them and a relay should
+ * mirror the control family. The premise does not survive a control.
+ *
+ * Probed on 2026-09-10 against `deepseek-v4-pro`, `qwen-plus`, `kimi-k3` and
+ * `glm-5-turbo` on the OpenAI-compatible path, each alongside a no-field
+ * control that answered 200:
+ *
+ *   enable_thinking: false        200
+ *   thinking: {type: 'disabled'}  200
+ *   thinking_budget: 128          200
+ *   banana_toggle: true           200   <- a field that exists nowhere
+ *
+ * An invented field is accepted exactly like the real ones, so this surface
+ * discards unknown top-level keys rather than forwarding them. A 200 on
+ * `enable_thinking` is therefore not evidence that a toggle exists; it is
+ * evidence that nothing is listening. Publishing `toggle` on that basis would
+ * hand callers a control the gateway throws away.
+ *
+ * `reasoning_effort` is different in kind: an invalid value is REJECTED on the
+ * models that read it, which is how this file tells a live control from a
+ * swallowed one, and it is why the two categories below are kept apart.
+ */
 const EFFORT_VALIDATED_BUT_INERT: ReadonlySet<string> = new Set([
   "moonshotai/kimi-k2-thinking",
 ]);
 
 const EFFORT_NOT_HONOURED: ReadonlySet<string> = new Set([
+  // Re-verified 2026-09-10 by the token-scaling test the review asked for,
+  // rather than by status codes alone: `low` measured 3837 and 3841 reasoning
+  // tokens, `high` measured 3837 and 3838. Four runs, a spread of four tokens,
+  // no movement between the levels at all. Peers publish L/M/H for this id;
+  // this host accepts the names and steers nothing.
   "google/gemini-3.1-pro-preview",
   "google/gemma-4-26b-a4b-it",
   "z-ai/glm-5v-turbo",
