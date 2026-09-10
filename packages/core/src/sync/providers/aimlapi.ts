@@ -99,9 +99,6 @@ const MEASURED_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   "google/gemini-3.7-flash": ["low", "medium", "high", "max"],
   // schema offers none; refused as a validation error
   "google/gemini-3.6-flash": ["minimal", "low", "medium", "high", "max"],
-  // the other direction: schema omits `max`, the endpoint serves it — the same
-  // gap the sibling opus-4.8 does not have, so it is the schema that differs
-  "anthropic/claude-opus-4.7": ["none", "low", "medium", "high", "max"],
   // The schema offers `xhigh` on both and the endpoint answers 200 for it, so
   // no status-code probe could catch this. Pinned to the direct hop on a prompt
   // hard enough to show the difference, `xhigh` produced 0 reasoning tokens on

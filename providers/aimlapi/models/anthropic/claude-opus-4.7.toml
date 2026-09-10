@@ -3,7 +3,7 @@ name = "Claude 4.7 Opus"
 
 [[reasoning_options]]
 type = "effort"
-values = ["none", "low", "medium", "high", "max"]
+values = ["none", "low", "medium", "high", "xhigh", "max"]
 
 [cost]
 input = 6.877
