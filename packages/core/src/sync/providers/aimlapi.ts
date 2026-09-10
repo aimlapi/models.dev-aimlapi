@@ -191,6 +191,15 @@ const EFFORT_NOT_HONOURED: ReadonlySet<string> = new Set([
  *   qwen3.8-max          baseline low/medium/xhigh-> `xhigh` refused, so low/medium
  *   gpt-5-pro            baseline high            -> `high`
  *
+ * The DeepSeek V4 family was here and is not any more. The review asked for
+ * the lab set, this table gave it, and the next round objected that doing so
+ * "removes caller off/lower rungs that the host reportedly accepted" — which
+ * is what the entry's own note had said it cost. Re-probed on that objection:
+ * an invalid value is rejected, `none` returns 0 reasoning tokens twice over,
+ * `low` returns 4175 and `high` 5662. That is an ordered ladder with a working
+ * off path, so the ids go back to the host's own set and the baseline no
+ * longer overrides them.
+ *
  * Where measurement and baseline disagree, this table is the baseline winning
  * by decision, not by evidence. `deepseek-v4-pro` orders 4374 -> 4936 reasoning
  * tokens between `low` and `high` with the field validated, and `gpt-5-pro`
@@ -198,14 +207,42 @@ const EFFORT_NOT_HONOURED: ReadonlySet<string> = new Set([
  * than those probes support. Restoring the wider sets means deleting the entry.
  */
 const REVIEW_BASELINE_EFFORTS: Readonly<Record<string, readonly string[]>> = {
-  "deepseek/deepseek-v4-pro": ["high"],
-  "deepseek/deepseek-v4-pro-0813": ["high"],
-  "deepseek/deepseek-v4-flash": ["low", "high"],
-  "deepseek/deepseek-v4-flash-vision-exp": ["low", "high"],
   "alibaba/qwen3.8-max": ["low", "medium"],
   "openai/gpt-5-pro": ["high"],
 };
 
+/**
+ * `none` on the Claude ladders, which the review asked to justify or drop.
+ *
+ * It is a real control, and what it does depends on which link serves the
+ * request — so the honest answer is per model rather than per family.
+ *
+ * `claude-opus-4.7` and `4.8` reach OpenRouter for every rung up to `high`,
+ * and only `xhigh`/`max` go to Anthropic natively. On that link `none`
+ * measured 0 reasoning tokens against 191 at `low` and 1228 at `high`: an off
+ * switch, and the reason `none` stays on those ids.
+ *
+ * `claude-sonnet-5` has no OpenRouter link, so every rung goes native, and
+ * Anthropic has no off switch on its adaptive models — `thinking:
+ * {type: 'disabled'}` returns 200 there and is ignored. The host used to drop
+ * the field entirely for `none`, which handed the request to Anthropic's
+ * default: 6000 output tokens spent thinking and an EMPTY reply. That is fixed
+ * upstream and `none` now maps to `low`, the cheapest rung the vendor has, so
+ * on this id it means minimum rather than off.
+ *
+ * Both are worth publishing — a caller sending `none` gets the least thinking
+ * available either way — but they are not the same promise, and this is where
+ * that is written down.
+ */
+/**
+ * `alibaba/qwen3.8-2.4t-a95b` keeps `high` as its top rung.
+ *
+ * The review asked for `xhigh` instead, on the peer ladder for this model.
+ * Probed twice: `xhigh` answers 400 with `Expected 'low' | 'medium' | 'high'`,
+ * so the host does not offer it and publishing it would hand callers an error.
+ * `high` at 4000 tokens times out at the gateway rather than returning, so
+ * whether the rungs order is still unmeasured — the enum, however, is settled.
+ */
 const MEASURED_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   // schema offers none+minimal; both refused, `none` explicitly and by name.
   // `max` is kept on evidence the review asked to see recorded here: measured
@@ -385,8 +422,35 @@ function isChatTextModel(model: AimlapiModel): boolean {
  * of these models, so every entry has to point at the lab file rather than
  * restate it.
  */
+/**
+ * Ids whose `base_model` is not the lab entry their own name resolves to.
+ *
+ * `deepseek-chat` is the case this exists for. DeepSeek retired the model
+ * behind that name and routes the id to its current Flash build, so pointing
+ * at the chat lab entry inherits the wrong everything: a 128K window for a
+ * model with 1M, and `reasoning = false` for one that reasons. The host itself
+ * bills the id on the Flash grid and has since corrected its own row's name
+ * and limits; this is the same correction on the catalogue side.
+ */
+/**
+ * Ids whose host label is known stale, so the lab name is the better one.
+ *
+ * Only `deepseek/deepseek-chat`, and only until the host's own correction
+ * ships: production still calls it "DeepSeek V3" while serving a Flash build,
+ * and republishing that beside a Flash `base_model` would put a contradiction
+ * in the catalogue. The fix upstream is merged, and when it lands this set can
+ * go — the host will be saying the right thing itself.
+ */
+const SUPPRESS_HOST_NAME: ReadonlySet<string> = new Set([
+  "deepseek/deepseek-chat",
+]);
+
+const BASE_MODEL_OVERRIDES: Readonly<Record<string, string>> = {
+  "deepseek/deepseek-chat": "deepseek/deepseek-v4-flash",
+};
+
 function baseModelFor(id: string): string | undefined {
-  return resolveModelMetadataBaseModel(id);
+  return BASE_MODEL_OVERRIDES[id] ?? resolveModelMetadataBaseModel(id);
 }
 
 function baseReasoning(baseModelID: string): boolean {
@@ -613,7 +677,7 @@ export const aimlapi = {
           // would inherit its display name, so the catalogue would list two rows
           // called "GPT-5.6 Luna". The host names them apart; carry that through
           // and the override drops itself when the names already agree.
-          name: info.name ?? undefined,
+          name: SUPPRESS_HOST_NAME.has(model.id) ? undefined : (info.name ?? undefined),
           reasoning_options: reasoningOptions,
           limit,
         },
