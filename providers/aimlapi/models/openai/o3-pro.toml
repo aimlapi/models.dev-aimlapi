@@ -1,6 +1,9 @@
 base_model = "openai/o3-pro"
 name = "o3 Pro"
 
+[interleaved]
+field = "reasoning_details"
+
 [[reasoning_options]]
 type = "effort"
 values = ["low", "medium", "high"]

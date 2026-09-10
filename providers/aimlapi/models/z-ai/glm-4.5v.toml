@@ -1,6 +1,9 @@
 base_model = "zhipuai/glm-4.5v"
 name = "GLM 4.5V"
 
+[interleaved]
+field = "reasoning_details"
+
 [[reasoning_options]]
 type = "effort"
 values = ["none", "minimal", "low", "medium", "high"]

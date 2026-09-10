@@ -1,6 +1,9 @@
 base_model = "bytedance-seed/seed-2.0-code"
 name = "Seed-2.0-Code"
 
+[interleaved]
+field = "reasoning_details"
+
 [[reasoning_options]]
 type = "effort"
 values = ["none", "low", "medium", "high"]

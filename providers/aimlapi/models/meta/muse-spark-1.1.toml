@@ -1,5 +1,8 @@
 base_model = "meta/muse-spark-1.1"
 
+[interleaved]
+field = "reasoning_details"
+
 [[reasoning_options]]
 type = "effort"
 values = ["none", "low", "medium", "high"]

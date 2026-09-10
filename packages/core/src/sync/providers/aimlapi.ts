@@ -321,6 +321,13 @@ const MEASURED_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   // review asked for this too, on the different ground that the lab omits it;
   // the measurement is what this entry rests on. `xhigh` is not added back —
   // this host's schema stops at `high` and refuses it.
+  // Re-probed on a hard prompt at the review's suggestion, because the light
+  // one had `gpt-5.2-pro` not reasoning at all. `low` and `medium` come back
+  // indistinguishable on both — 1400 against 1311, and 2345 against 2336 —
+  // while `high` sits above where it could be measured at all. Same call as
+  // `gpt-5.4-pro` below: two names for one behaviour, so the lower goes.
+  "openai/gpt-5.2-pro": ["medium", "high"],
+  "openai/gpt-5.5-pro": ["medium", "high"],
   "openai/gpt-5.4-pro": ["medium", "high"],
   // `none` dropped 2026-09-10. On this id every rung reaches Anthropic
   // natively, and Anthropic has no off switch on its adaptive models, so the
@@ -337,8 +344,97 @@ const MEASURED_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   // in a catalogue other people build against.
   "alibaba/qwen3.8-max": ["low", "medium", "high"],
   "anthropic/claude-sonnet-5": ["low", "medium", "high", "xhigh", "max"],
+  // `medium` dropped 2026-09-10, and this is a correction to an earlier call
+  // in this file rather than a new measurement. It measured 5563 and then 7204
+  // against `high`'s 5662: a spread inside the rung wider than any gap to the
+  // rung above. That was recorded as "unsettled, so keep it" — but publishing
+  // a rung is a claim too, and `gpt-5.4-pro` above had the identical shape and
+  // lost `low` for it. Two rules for one situation is worse than either rule.
+  // `none` (0 twice) and `low` (4175 against 5662) stay: those are measured.
+  "deepseek/deepseek-v4-pro": ["none", "low", "high"],
   "openai/o1": ["low", "medium", "high"],
   "openai/o3-mini": ["low", "medium", "high"],
+};
+
+/**
+ * Models whose reasoning arrives on a side channel rather than in `content`.
+ *
+ * The review asked whether this gateway returns one, and it does — but the lab
+ * entries that declare it are NOT inherited through `base_model`, so the built
+ * catalogue showed `interleaved` unset on every aimlapi row while the provider
+ * was in fact emitting 20K characters of chain-of-thought in a separate field.
+ * A client reading only this provider would render that as the answer.
+ *
+ * Probed across all 81 ids that carry a reasoning ladder, 2026-09-10, by
+ * reading the keys actually present on the response message rather than by
+ * family: 14 return `reasoning_content`, 44 return `reasoning_details`
+ * alongside `reasoning`.
+ *
+ * Fifteen more return a bare `reasoning`, and two Gemini Flash ids return
+ * `extra_content`. Neither name is in the schema's enum, so those stay unset —
+ * recorded here so the gap reads as known rather than missed. Most of that
+ * group is the Anthropic line, where the field carries the summarised thinking
+ * block.
+ */
+const INTERLEAVED_FIELD: Readonly<Record<string, "reasoning_content" | "reasoning_details">> = {
+  "alibaba/qwen3.5-flash": "reasoning_content",
+  "alibaba/qwen3.6-27b": "reasoning_content",
+  "alibaba/qwen3.6-35b-a3b": "reasoning_content",
+  "alibaba/qwen3.6-max-preview": "reasoning_content",
+  "alibaba/qwen3.7-max": "reasoning_content",
+  "alibaba/qwen3.8-flash": "reasoning_content",
+  "alibaba/qwen3.8-max": "reasoning_content",
+  "anthropic/claude-fable-5": "reasoning_content",
+  "anthropic/claude-sonnet-5": "reasoning_content",
+  "deepseek/deepseek-v4-flash": "reasoning_content",
+  "deepseek/deepseek-v4-flash-vision-exp": "reasoning_content",
+  "deepseek/deepseek-v4-pro": "reasoning_content",
+  "moonshot/kimi-k3": "reasoning_content",
+  "z-ai/glm-5.3-flash": "reasoning_content",
+  "alibaba/qwen3.8-2.4t-a95b": "reasoning_details",
+  "alibaba/qwen3.8-27b": "reasoning_details",
+  "arcee-ai/trinity-large-thinking": "reasoning_details",
+  "bytedance-seed/seed-2.0-code": "reasoning_details",
+  "bytedance-seed/seed-2.0-lite": "reasoning_details",
+  "bytedance-seed/seed-2.0-mini": "reasoning_details",
+  "deepseek/deepseek-v4-pro-0813": "reasoning_details",
+  "google/gemini-3.1-flash-lite-preview": "reasoning_details",
+  "google/gemini-3.1-pro-preview-customtools": "reasoning_details",
+  "google/gemini-flash-latest": "reasoning_details",
+  "inclusionai/ling-3.0-flash-fin": "reasoning_details",
+  "meta/muse-glimmer-30b": "reasoning_details",
+  "meta/muse-spark-1.1": "reasoning_details",
+  "meta/muse-spark-1.2": "reasoning_details",
+  "openai/gpt-5": "reasoning_details",
+  "openai/gpt-5-mini": "reasoning_details",
+  "openai/gpt-5-nano": "reasoning_details",
+  "openai/gpt-5-pro": "reasoning_details",
+  "openai/gpt-5.1-codex": "reasoning_details",
+  "openai/gpt-5.1-codex-max": "reasoning_details",
+  "openai/gpt-5.1-codex-mini": "reasoning_details",
+  "openai/gpt-5.2-codex": "reasoning_details",
+  "openai/gpt-5.2-pro": "reasoning_details",
+  "openai/gpt-5.3-codex": "reasoning_details",
+  "openai/gpt-5.4-pro": "reasoning_details",
+  "openai/gpt-5.5-pro": "reasoning_details",
+  "openai/gpt-5.6-luna-pro": "reasoning_details",
+  "openai/gpt-5.6-sol-pro": "reasoning_details",
+  "openai/gpt-5.6-terra-pro": "reasoning_details",
+  "openai/gpt-oss-120b": "reasoning_details",
+  "openai/gpt-oss-20b": "reasoning_details",
+  "openai/o1-pro": "reasoning_details",
+  "openai/o3-pro": "reasoning_details",
+  "poolside/laguna-s-2.1": "reasoning_details",
+  "poolside/laguna-xs-2.1": "reasoning_details",
+  "tencent/hy3": "reasoning_details",
+  "tencent/hy4-preview": "reasoning_details",
+  "thinkingmachines/inkling": "reasoning_details",
+  "thinkingmachines/inkling-small": "reasoning_details",
+  "xiaomi/mimo-v2.5": "reasoning_details",
+  "xiaomi/mimo-v2.5-pro": "reasoning_details",
+  "z-ai/glm-4.5v": "reasoning_details",
+  "z-ai/glm-4.6v": "reasoning_details",
+  "z-ai/glm-4.7-flash": "reasoning_details",
 };
 
 const DOCS_CONCURRENCY = 8;
@@ -754,6 +850,9 @@ export const aimlapi = {
           // and the override drops itself when the names already agree.
           name: STALE_HOST_ROW.has(model.id) ? undefined : (info.name ?? undefined),
           reasoning_options: reasoningOptions,
+          interleaved: INTERLEAVED_FIELD[model.id]
+            ? { field: INTERLEAVED_FIELD[model.id]! }
+            : undefined,
           limit,
         },
         limit,

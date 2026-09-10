@@ -1,5 +1,8 @@
 base_model = "google/gemini-3.1-flash-lite-preview"
 
+[interleaved]
+field = "reasoning_details"
+
 [[reasoning_options]]
 type = "effort"
 values = ["none", "low", "medium", "high"]

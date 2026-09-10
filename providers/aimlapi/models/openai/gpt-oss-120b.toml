@@ -1,5 +1,8 @@
 base_model = "openai/gpt-oss-120b"
 
+[interleaved]
+field = "reasoning_details"
+
 [[reasoning_options]]
 type = "effort"
 values = ["low", "medium", "high"]

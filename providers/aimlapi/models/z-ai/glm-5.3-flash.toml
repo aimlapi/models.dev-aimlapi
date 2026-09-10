@@ -1,6 +1,9 @@
 base_model = "zhipuai/glm-5.3-flash"
 name = "GLM 5.3 Flash"
 
+[interleaved]
+field = "reasoning_content"
+
 [[reasoning_options]]
 type = "effort"
 values = ["minimal", "low", "medium", "high", "max"]

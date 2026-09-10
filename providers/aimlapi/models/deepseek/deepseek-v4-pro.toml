@@ -1,8 +1,11 @@
 base_model = "deepseek/deepseek-v4-pro"
 
+[interleaved]
+field = "reasoning_content"
+
 [[reasoning_options]]
 type = "effort"
-values = ["none", "low", "medium", "high"]
+values = ["none", "low", "high"]
 
 [cost]
 input = 0.5655
