@@ -170,6 +170,14 @@ const MEASURED_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   // exactly this set on both ids and was right; the host has since stopped
   // advertising `xhigh` here, so this entry becomes a no-op rather than an
   // override once that reaches production.
+  // `low` measured indistinguishable from `medium` on a prompt hard enough to
+  // separate them: low 2230 and 2273 reasoning tokens, medium 2180 and 2420,
+  // overlapping ranges across repeats, while `high` sat clearly above at 2984.
+  // Two names for one behaviour is worse than one name, so `low` goes. The
+  // review asked for this too, on the different ground that the lab omits it;
+  // the measurement is what this entry rests on. `xhigh` is not added back —
+  // this host's schema stops at `high` and refuses it.
+  "openai/gpt-5.4-pro": ["medium", "high"],
   "openai/o1": ["low", "medium", "high"],
   "openai/o3-mini": ["low", "medium", "high"],
 };
