@@ -232,6 +232,40 @@ const EFFORT_NOT_HONOURED: ReadonlySet<string> = new Set([
 const REVIEW_BASELINE_EFFORTS: Readonly<Record<string, readonly string[]>> = {};
 
 /**
+ * The OpenAI pro/codex/5.6 batch, probed 2026-09-10 because the review asked
+ * for each id to be intersected with a live accept-and-honour test.
+ *
+ * An invalid effort is rejected on all nine, so every ladder below is a live
+ * control rather than a swallowed field.
+ *
+ * The rungs the review wanted ADDED are refused here. `xhigh` answers 400 on
+ * `gpt-5.2-pro`, `gpt-5.5-pro` and `gpt-5.3-codex`; `max` answers 400 on
+ * `gpt-5.6-luna`. Publishing the lab's wider sets would hand callers an error,
+ * so the host's narrower enum stands.
+ *
+ * The rung the review worried was fake is real. `none` measured 0 reasoning
+ * tokens on every id that offers it — `gpt-5.3-codex`, `gpt-5.6-luna`, `-sol`,
+ * `-terra` and `-terra-pro` — against non-zero at `high` on each. That is the
+ * check Sonnet 5 failed, and these pass it.
+ *
+ * Ordering, on a deliberately light prompt so the batch could finish:
+ *
+ *   gpt-5.2-codex     low 90    high 192   ordered
+ *   gpt-5.1-codex     low 0     high 103   ordered
+ *   gpt-5.6-terra     low 9     high 25    ordered
+ *   gpt-5.6-terra-pro low 91    high 129   ordered
+ *   gpt-5.6-sol       low 0     high 9     ordered, barely
+ *   gpt-5.6-luna      low 26    high 27    not separated
+ *   gpt-5.5-pro       low 33    high 31    not separated
+ *   gpt-5.2-pro       0 at every rung — the model did not reason at all here
+ *
+ * The last three are left alone rather than trimmed. `gpt-5.2-pro` is the
+ * `kwaipilot` case from the Method section: when the control itself produces
+ * nothing, the cells say nothing about the ladder. The other two would need a
+ * harder prompt than this batch could afford, and a rung the host accepts is
+ * not removed on a probe that failed to separate anything.
+ */
+/**
  * `none` on the Claude ladders, which the review asked to justify or drop.
  *
  * It is a real control, and what it does depends on which link serves the
