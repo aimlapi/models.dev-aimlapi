@@ -205,10 +205,20 @@ const EFFORT_NOT_HONOURED: ReadonlySet<string> = new Set([
  * "removes caller off/lower rungs that the host reportedly accepted" — which
  * is what the entry's own note had said it cost. Re-probed on that objection:
  * an invalid value is rejected, `none` returns 0 reasoning tokens twice over,
- * `low` returns 4175, `medium` 5563 and `high` 5662. Four rungs, in order,
- * with a working off path — the "invented GPT-style ladder" the review keeps
- * naming is the one this host measurably has. `medium` was the last untested
- * rung and was probed on the review's own objection to keeping it.
+ * `low` returns 4175, `medium` 5563 and `high` 5662. A working off path and a
+ * clear step from `none` to `low` to the pair above it.
+ *
+ * `medium` versus `high` is a different question and it is UNSETTLED. The
+ * review objected to keeping `medium` on "near-identical token counts", which
+ * was fair on one sample — 5563 against 5662 is under two percent, and the
+ * same reasoning removed `low` from `gpt-5.4-pro`. Re-probed for that reason,
+ * `medium` came back 7204: its own spread across runs is thirty percent, an
+ * order of magnitude wider than the gap being argued about, and `high` timed
+ * out on three of four attempts so there is nothing to average against.
+ *
+ * The two cannot be shown to order and cannot be shown not to. `medium` stays
+ * because removing a rung the host accepts needs evidence, and noise larger
+ * than the effect is not evidence — in either direction.
  *
  * So the ids go back to the host's own set and the baseline no longer
  * overrides them.
@@ -219,9 +229,7 @@ const EFFORT_NOT_HONOURED: ReadonlySet<string> = new Set([
  * ordered 64/256/320 and 128/192 across repeats; both keep fewer rungs here
  * than those probes support. Restoring the wider sets means deleting the entry.
  */
-const REVIEW_BASELINE_EFFORTS: Readonly<Record<string, readonly string[]>> = {
-  "openai/gpt-5-pro": ["high"],
-};
+const REVIEW_BASELINE_EFFORTS: Readonly<Record<string, readonly string[]>> = {};
 
 /**
  * `none` on the Claude ladders, which the review asked to justify or drop.
@@ -287,6 +295,13 @@ const MEASURED_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   // off here, which is not what they would get. The sibling opus-4.7/4.8 keep
   // `none` because their lower rungs reach OpenRouter, where it measured 0
   // reasoning tokens against 191 at `low`: there it really is off.
+  // `none` dropped 2026-09-10: it is accepted, but nothing shows it turns
+  // reasoning off. Two runs returned no `reasoning_tokens` field at all while
+  // still producing 1703 and 2000 output tokens, so there is no reading of
+  // that as an off switch — and `high` on the same model does report 2000
+  // reasoning tokens. A rung whose semantics cannot be shown does not belong
+  // in a catalogue other people build against.
+  "alibaba/qwen3.8-max": ["low", "medium", "high"],
   "anthropic/claude-sonnet-5": ["low", "medium", "high", "xhigh", "max"],
   "openai/o1": ["low", "medium", "high"],
   "openai/o3-mini": ["low", "medium", "high"],
@@ -445,7 +460,10 @@ function isChatTextModel(model: AimlapiModel): boolean {
 /**
  * Ids whose `base_model` is not the lab entry their own name resolves to.
  *
- * `deepseek-chat` is the case this exists for. DeepSeek retired the model
+ * `deepseek-chat` is the case this exists for. Confirmed on production
+ * 2026-09-10 rather than inferred: three calls to that id each answered
+ * `"model": "deepseek-flash"`, the same string `deepseek-v4-flash` returns.
+ * DeepSeek retired the model
  * behind that name and routes the id to its current Flash build, so pointing
  * at the chat lab entry inherits the wrong everything: a 128K window for a
  * model with 1M, and `reasoning = false` for one that reasons. The host itself
