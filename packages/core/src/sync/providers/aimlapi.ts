@@ -54,7 +54,18 @@ const EFFORT_RANK = new Map(EFFORT_VALUES.map((value, index) => [value as string
  * became real.
  *
  * Measured 2026-09-09 across all 87 entries that carry reasoning options; these
- * six were the only ones that failed the check.
+ * were the only ones that failed the check. Re-probed 2026-09-10: five still
+ * accept `banana` with a 200 and stay.
+ *
+ * `moonshot/kimi-k3` was removed on 2026-09-10. Re-probed, its control answers
+ * 200 and a deliberately invalid effort answers 400 — the field is read and
+ * enforced, which is the one thing `[]` asserts is not true. Whether the levels
+ * ORDER is still unproven: `low` measured 919 and 1618 reasoning tokens and
+ * `high` measured 1943, so the spread within `low` is nearly the distance from
+ * `low` to `high`, and `max` timed out at the gateway on both attempts. The id
+ * therefore goes back to the schema-derived ladder its card declares, which is
+ * the host's own statement about itself, rather than to a claim of ours that
+ * the measurement does not support in either direction.
  */
 /**
  * Catalogue rows that cannot actually be called: `/v1/models` lists them with a
@@ -101,7 +112,6 @@ const EFFORT_VALIDATED_BUT_INERT: ReadonlySet<string> = new Set([
 ]);
 
 const EFFORT_NOT_HONOURED: ReadonlySet<string> = new Set([
-  "moonshot/kimi-k3",
   "google/gemini-3.1-pro-preview",
   "google/gemma-4-26b-a4b-it",
   "z-ai/glm-5v-turbo",
