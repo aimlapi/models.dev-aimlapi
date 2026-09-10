@@ -7,4 +7,4 @@ values = ["none", "low", "medium", "high"]
 [cost]
 input = 0.39
 output = 1.56
-cache_read = 0.0078000000000000005
+cache_read = 0.0078

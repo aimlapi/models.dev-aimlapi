@@ -78,6 +78,28 @@ const NOT_CALLABLE: ReadonlySet<string> = new Set([
   "anthropic/claude-opus-4.8-fast",
 ]);
 
+/**
+ * Ladders the endpoint VALIDATES and then does not act on.
+ *
+ * Kept apart from `EFFORT_NOT_HONOURED` because the evidence is different and
+ * the two must not be confused. There, an invalid value returns 200, which
+ * proves the field is never read. Here an invalid value is rejected — the
+ * field is read, parsed and enforced — and the levels still fail to order.
+ *
+ * `moonshotai/kimi-k2-thinking`, measured 2026-09-10 on a prompt hard enough
+ * to make a difference visible: `low` produced 6723 and 8207 reasoning tokens
+ * across repeats, `high` produced 6508. Unset produced 2919 against `low`'s
+ * 2799 on a smaller budget. `low` above `high` is not a small delta in the
+ * wrong direction, it is the absence of an ordering, and the lab entry for
+ * this model publishes `reasoning_options = []` for the same reason: the
+ * model always reasons and the caller cannot steer it.
+ *
+ * Publishing a ladder here would sell a dial that turns nothing.
+ */
+const EFFORT_VALIDATED_BUT_INERT: ReadonlySet<string> = new Set([
+  "moonshotai/kimi-k2-thinking",
+]);
+
 const EFFORT_NOT_HONOURED: ReadonlySet<string> = new Set([
   "moonshot/kimi-k3",
   "google/gemini-3.1-pro-preview",
@@ -284,7 +306,12 @@ function perMillion(units: readonly z.infer<typeof PricingUnit>[], origin: strin
     (candidate) => candidate.name === "token" && candidate.content === "text" && candidate.origin === origin,
   );
   if (!unit || unit.price == null || !unit.per) return undefined;
-  return (unit.price / unit.per) * 1_000_000;
+  // Round before returning. `(0.0000000078 / 1) * 1e6` is
+  // 0.0078000000000000005 in IEEE double, and `formatNumber` serializes the
+  // residue verbatim — so the catalogue carried a price with fifteen decimals
+  // that changes shape whenever the upstream `per` does. Six decimals is finer
+  // than any published USD/MTok figure here.
+  return Math.round(((unit.price / unit.per) * 1_000_000) * 1e6) / 1e6;
 }
 
 function positive(value: number | null | undefined): number | undefined {
@@ -315,7 +342,7 @@ async function fetchReasoningEffort(id: string): Promise<string[] | undefined> {
     return undefined;
   }
 
-  if (EFFORT_NOT_HONOURED.has(id)) return undefined;
+  if (EFFORT_NOT_HONOURED.has(id) || EFFORT_VALIDATED_BUT_INERT.has(id)) return undefined;
 
   const measured = MEASURED_EFFORTS[id];
   if (measured) return [...measured];
@@ -440,7 +467,7 @@ export const aimlapi = {
       // A model that reasons but honours no caller control gets an empty list:
       // the schema requires the field, and an empty one states the truth —
       // reasoning happens, nothing about it is selectable.
-      if (EFFORT_NOT_HONOURED.has(model.id)) {
+      if (EFFORT_NOT_HONOURED.has(model.id) || EFFORT_VALIDATED_BUT_INERT.has(model.id)) {
         reasoningOptions = [];
       } else {
         const values = model.reasoningEffort ?? undefined;

@@ -1,8 +1,5 @@
 base_model = "moonshotai/kimi-k2-thinking"
-
-[[reasoning_options]]
-type = "effort"
-values = ["low", "medium", "high"]
+reasoning_options = []
 
 [cost]
 input = 0.82524
