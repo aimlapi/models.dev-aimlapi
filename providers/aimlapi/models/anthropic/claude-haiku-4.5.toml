@@ -1,9 +1,6 @@
 base_model = "anthropic/claude-haiku-4-5"
 name = "Claude 4.5 Haiku"
-
-[[reasoning_options]]
-type = "effort"
-values = ["low", "medium", "high"]
+reasoning_options = []
 
 [cost]
 input = 1.3754

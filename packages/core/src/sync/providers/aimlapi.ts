@@ -152,6 +152,28 @@ const EFFORT_VALIDATED_BUT_INERT: ReadonlySet<string> = new Set([
   // lab publishes toggle only for this id, which the wire agrees with: there
   // is thinking, and nothing the caller sends steers how much.
   "z-ai/glm-4.7-flash",
+  // The other toggle-only labs, 2026-09-11, each on two repeats of low/high
+  // with the field validated. None orders, and the wire agrees with the lab:
+  //   claude-haiku-4.5      188/182 vs 179/185
+  //   qwen3.6-max-preview   574/580 vs 552/554   (high below low, both times)
+  //   gemma-4-31b-it        reasoning count 1 at every rung
+  //   mimo-v2.5-pro         reasoning count 0 at every rung
+  //   mimo-v2.5             307/234 vs 104/235
+  //   glm-4.5v              614/680 vs 641/643
+  //   glm-4.6v              191/116 vs 123/109
+  // `claude-sonnet-4.5` is the one with a direction — 184/183 vs 220/210 —
+  // but a thirty-token delta on a model the host's own middleware lists as
+  // effort-unsupported (`strip-unsupported-effort.ts`) is not evidence
+  // enough to contradict a lab that publishes toggle only. Recorded so it can
+  // be revisited; it takes `[]` with the rest.
+  "anthropic/claude-haiku-4.5",
+  "anthropic/claude-sonnet-4.5",
+  "alibaba/qwen3.6-max-preview",
+  "google/gemma-4-31b-it",
+  "xiaomi/mimo-v2.5-pro",
+  "xiaomi/mimo-v2.5",
+  "z-ai/glm-4.5v",
+  "z-ai/glm-4.6v",
 ]);
 
 const EFFORT_NOT_HONOURED: ReadonlySet<string> = new Set([
@@ -613,14 +635,25 @@ function baseModelFor(id: string): string | undefined {
  * What the doctrine buys is that re-sync cannot reintroduce a rung the lab
  * does not publish, and that this provider reads like its peers.
  */
+/** What the lab's provider entry says about effort, three ways. */
+export type LabLadder =
+  | { kind: "effort"; values: readonly string[] }
+  | { kind: "no-effort" } // the entry exists and lists toggle/budget only
+  | { kind: "no-entry" }; // no first-party provider entry for this base
+
 export function labEffortValues(baseModelID: string): readonly string[] | undefined {
+  const ladder = labLadder(baseModelID);
+  return ladder.kind === "effort" ? ladder.values : undefined;
+}
+
+export function labLadder(baseModelID: string): LabLadder {
   // The lab's ladder lives on its first-party PROVIDER entry, not on the
   // shared model record: `models/<lab>/<id>.toml` carries name, family and
   // capabilities and no `reasoning_options`. So this reads
   // `providers/<lab>/models/<id>.toml`, the same file a reviewer means when
   // they say "the lab publishes".
   const slash = baseModelID.indexOf("/");
-  if (slash === -1) return undefined;
+  if (slash === -1) return { kind: "no-entry" };
   // `base_model` names the METADATA lab; the ladder is under the PROVIDER
   // directory, and for `zhipuai` -> `zai`, `meta` -> `llama` those differ.
   // The first version of this lookup assumed they matched and silently kept
@@ -644,13 +677,13 @@ export function labEffortValues(baseModelID: string): readonly string[] | undefi
       /* try the next candidate */
     }
   }
-  if (parsed === undefined) return undefined;
+  if (parsed === undefined) return { kind: "no-entry" };
   const opts = parsed["reasoning_options"];
-  if (!Array.isArray(opts)) return undefined;
+  if (!Array.isArray(opts)) return { kind: "no-entry" };
   const effort = opts.find((o) => o && typeof o === "object" && (o as { type?: unknown }).type === "effort") as
     | { values?: unknown }
     | undefined;
-  return Array.isArray(effort?.values) ? (effort!.values as string[]) : undefined;
+  return Array.isArray(effort?.values) ? { kind: "effort", values: effort!.values as string[] } : { kind: "no-effort" };
 }
 
 /**
@@ -682,12 +715,9 @@ export function labEffortValues(baseModelID: string): readonly string[] | undefi
  *                            name IS the budget tier, which is the lab's own
  *                            control under the host's spelling.
  *
- * Still unresolved and left on the host's enum rather than flipped to `[]`:
- * `glm-4.5v`, `glm-4.6v`, `gemma-4-31b-it`, `qwen3.6-max-preview`,
- * `mimo-v2.5`, `mimo-v2.5-pro`. On each the field validates and `low` alone
- * reasons (2500 tokens, capped), but `high` timed out at the gateway so no
- * ordering could be taken. `[]` would tell callers a working field does not
- * exist, which is the one claim the evidence rules out.
+ * Everything else with a toggle-only lab was measured on repeats and did not
+ * order; those are in `EFFORT_VALIDATED_BUT_INERT` and publish `[]`. Nothing
+ * with a toggle-only lab is left on the host's enum without a probe behind it.
  */
 const HOST_EFFORT_LIVE: ReadonlySet<string> = new Set([
   "google/gemini-2.5-flash-lite",
@@ -807,11 +837,37 @@ async function fetchReasoningEffort(id: string, base: string): Promise<string[] 
  *    inert — but never widen it past the lab.
  */
 export function resolveLadder(id: string, base: string, host: readonly string[]): string[] | undefined {
-  const lab = labEffortValues(base);
-  let values = [...host];
-  if (lab !== undefined && lab.length > 0) {
-    const shared = host.filter((value) => lab.includes(value));
-    values = shared.length > 0 ? shared : [...host];
+  const ladder = labLadder(base);
+  let values: string[];
+  let lab: readonly string[] | undefined;
+
+  switch (ladder.kind) {
+    case "effort": {
+      lab = ladder.values;
+      const shared = host.filter((value) => lab!.includes(value));
+      // Every lab rung refused here. That is a contradiction, not a licence
+      // to publish the host's rungs under the lab's name: unresolved, so the
+      // model is skipped rather than shipped with an invented ladder.
+      if (shared.length === 0) return undefined;
+      values = shared;
+      break;
+    }
+    case "no-effort":
+      // The lab has spoken and said "toggle / budget, no effort ladder". A
+      // host effort enum contradicts that, so it ships only where a probe
+      // showed the host's field is a live, host-native control — measured
+      // ordering, or a mapping onto the lab's own budget tiers. Otherwise the
+      // model is skipped: `[]` would claim no control, which the validated
+      // field rules out, and the enum would claim a family the lab denies.
+      if (!HOST_EFFORT_LIVE.has(id)) return undefined;
+      values = [...host];
+      break;
+    case "no-entry":
+      // Nothing to contradict: the lab does not publish this model, so the
+      // host's enum is the only ladder anyone has for it. Kept, on the
+      // understanding that "invented relative to the lab" needs a lab.
+      values = [...host];
+      break;
   }
 
   const labListsNone = lab !== undefined && lab.includes("none");

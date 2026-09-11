@@ -50,14 +50,29 @@ test("`none` is kept where the lab itself lists it", () => {
   expect(resolveLadder("openai/gpt-5.6-luna", "openai/gpt-5.6-luna", host)).toContain("none");
 });
 
-test("an empty intersection keeps the host enum rather than claiming no control", () => {
-  // Every lab rung refused here: publishing `[]` would say the field does not
-  // exist, which is the one thing the host's enum rules out.
-  const host = ["low", "medium"];
-  expect(resolveLadder("some/model", "deepseek/deepseek-v4-pro", host)).toEqual(["low", "medium"]);
-});
-
 test("a measurement narrows but never widens past the lab", () => {
   // gpt-5.4-pro: lab medium/high/xhigh, host low/medium/high, measured medium/high.
   expect(resolveLadder("openai/gpt-5.4-pro", "openai/gpt-5.4-pro", ["low", "medium", "high"])).toEqual(["medium", "high"]);
+});
+
+// The fallthrough the review found: a toggle-only lab must never turn into a
+// host-schema L/M/H dump. Either the host field is measured live for that id,
+// or the model is unresolved.
+test("a toggle-only lab base never yields the host's effort dump", () => {
+  const host = ["none", "minimal", "low", "medium", "high"];
+  // glm-4.5v: lab toggle-only, not in HOST_EFFORT_LIVE -> unresolved.
+  expect(resolveLadder("z-ai/glm-4.5v", "zhipuai/glm-4.5v", host)).toBeUndefined();
+  // qwen3.7-max: lab toggle+budget, but its `low`/`medium` map onto the lab's
+  // own budget tiers on this host -> the host enum is a live control, minus
+  // the unmeasured `none`.
+  expect(resolveLadder("alibaba/qwen3.7-max", "alibaba/qwen3.7-max", host)).toEqual(["minimal", "low", "medium", "high"]);
+});
+
+test("an empty intersection is unresolved, not the host enum", () => {
+  // lab high/max, host offers neither -> skip, do not republish low/medium.
+  expect(resolveLadder("deepseek/deepseek-v4-pro", "deepseek/deepseek-v4-pro", ["low", "medium"])).toBeUndefined();
+});
+
+test("a base with no lab entry keeps the host enum — there is nothing to contradict", () => {
+  expect(resolveLadder("some/model", "nolab/nothing-here", ["low", "high"])).toEqual(["low", "high"]);
 });
