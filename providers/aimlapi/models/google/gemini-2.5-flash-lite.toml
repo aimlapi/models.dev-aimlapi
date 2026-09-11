@@ -3,7 +3,7 @@ name = "Gemini 2.5 Flash Lite Preview"
 
 [[reasoning_options]]
 type = "effort"
-values = ["none", "minimal", "low", "medium", "high", "max"]
+values = ["minimal", "low", "medium", "high", "max"]
 
 [cost]
 input = 0.0975

@@ -3,7 +3,12 @@ import path from "node:path";
 import { z } from "zod";
 
 import type { SyncProvider } from "../index.js";
-import { factorBaseModel, modelMetadata, resolveModelMetadataBaseModel } from "./openrouter.js";
+import {
+  factorBaseModel,
+  modelMetadata,
+  providerDirForMetadataLab,
+  resolveModelMetadataBaseModel,
+} from "./openrouter.js";
 
 // The public catalog needs no key, and `include` is what turns on the pricing
 // and modality blocks this sync depends on.
@@ -89,6 +94,11 @@ const NOT_CALLABLE: ReadonlySet<string> = new Set([
   // id among them) and `/docs-json` answers 404 for it, so there is nothing
   // left to describe. The host's own deprecation record calls both withdrawn.
   "anthropic/claude-opus-4.8-fast",
+  // 2026-09-11: answers 404 to every request including the no-effort control —
+  // "0 endpoints out of 1 requested are available matching your guardrail
+  // restrictions and data policy", an OpenRouter refusal passed straight
+  // through. Found while probing its ladder; the ladder is moot.
+  "sakana/sakana-namazu",
 ]);
 
 /**
@@ -137,6 +147,11 @@ const NOT_CALLABLE: ReadonlySet<string> = new Set([
  */
 const EFFORT_VALIDATED_BUT_INERT: ReadonlySet<string> = new Set([
   "moonshotai/kimi-k2-thinking",
+  // 2026-09-11: an invalid value is rejected, and then `low` spends 2149
+  // reasoning tokens to `high`'s 1533 with unset at 1801 between them. The
+  // lab publishes toggle only for this id, which the wire agrees with: there
+  // is thinking, and nothing the caller sends steers how much.
+  "z-ai/glm-4.7-flash",
 ]);
 
 const EFFORT_NOT_HONOURED: ReadonlySet<string> = new Set([
@@ -598,7 +613,7 @@ function baseModelFor(id: string): string | undefined {
  * What the doctrine buys is that re-sync cannot reintroduce a rung the lab
  * does not publish, and that this provider reads like its peers.
  */
-function labEffortValues(baseModelID: string): readonly string[] | undefined {
+export function labEffortValues(baseModelID: string): readonly string[] | undefined {
   // The lab's ladder lives on its first-party PROVIDER entry, not on the
   // shared model record: `models/<lab>/<id>.toml` carries name, family and
   // capabilities and no `reasoning_options`. So this reads
@@ -606,7 +621,11 @@ function labEffortValues(baseModelID: string): readonly string[] | undefined {
   // they say "the lab publishes".
   const slash = baseModelID.indexOf("/");
   if (slash === -1) return undefined;
-  const lab = baseModelID.slice(0, slash);
+  // `base_model` names the METADATA lab; the ladder is under the PROVIDER
+  // directory, and for `zhipuai` -> `zai`, `meta` -> `llama` those differ.
+  // The first version of this lookup assumed they matched and silently kept
+  // the host enum for every GLM id — the review caught it from the TOMLs.
+  const lab = providerDirForMetadataLab(baseModelID.slice(0, slash));
   const name = baseModelID.slice(slash + 1);
   // A dated snapshot (`deepseek-v4-pro-0813`) has no lab entry of its own and
   // is the same control surface as the model it snapshots, so it borrows that
@@ -646,6 +665,38 @@ function labEffortValues(baseModelID: string): readonly string[] | undefined {
  */
 
 /**
+ * Ids whose lab entry has reasoning options but NO effort ladder — toggle or
+ * budget only — and whose `reasoning_effort` on this host was measured to be
+ * a live control anyway. The intersection has nothing to intersect with here,
+ * so this list is what stands between "the host's enum" and "an invented
+ * ladder": an id is on it only with an invalid value rejected AND either an
+ * ordering or a mapping onto the lab's own control.
+ *
+ *   gemini-2.5-flash-lite    low 863 -> high 2399 reasoning tokens
+ *   qwen3.6-27b, qwen3.7-max, qwen3.6-35b-a3b
+ *                            `low`/`medium` map onto the lab's thinking
+ *                            budget: the gateway answers "must be greater than
+ *                            thinking_budget [8192]" / "[32768]" when
+ *                            max_tokens is below them. That reads like a
+ *                            refused rung and is the opposite — the effort
+ *                            name IS the budget tier, which is the lab's own
+ *                            control under the host's spelling.
+ *
+ * Still unresolved and left on the host's enum rather than flipped to `[]`:
+ * `glm-4.5v`, `glm-4.6v`, `gemma-4-31b-it`, `qwen3.6-max-preview`,
+ * `mimo-v2.5`, `mimo-v2.5-pro`. On each the field validates and `low` alone
+ * reasons (2500 tokens, capped), but `high` timed out at the gateway so no
+ * ordering could be taken. `[]` would tell callers a working field does not
+ * exist, which is the one claim the evidence rules out.
+ */
+const HOST_EFFORT_LIVE: ReadonlySet<string> = new Set([
+  "google/gemini-2.5-flash-lite",
+  "alibaba/qwen3.6-27b",
+  "alibaba/qwen3.7-max",
+  "alibaba/qwen3.6-35b-a3b",
+]);
+
+/**
  * Ids where `reasoning_effort: none` is a measured off switch on this wire —
  * zero reasoning tokens against a non-zero count at a higher rung, with an
  * invalid value rejected so the field is known to be read. The lab sets never
@@ -657,6 +708,13 @@ function labEffortValues(baseModelID: string): readonly string[] | undefined {
 const NONE_IS_REAL_OFF: ReadonlySet<string> = new Set([
   "deepseek/deepseek-v4-pro",
   "deepseek/deepseek-v4-pro-0813",
+  // Flash measured by the strongest signal there is, the side channel itself:
+  // `none` returns an EMPTY `reasoning_content` where `high` returns 23469
+  // characters on `v4-flash` and 12826 on `vision-exp`. `reasoning_tokens` is
+  // absent rather than 0 on this link, which is why the count alone was not
+  // enough to call it — the same shape was left unclaimed on `qwen3.8-max`.
+  "deepseek/deepseek-v4-flash",
+  "deepseek/deepseek-v4-flash-vision-exp",
   "openai/gpt-5.3-codex",
   "openai/gpt-5.6-luna",
   "openai/gpt-5.6-sol",
@@ -731,27 +789,36 @@ async function fetchReasoningEffort(id: string, base: string): Promise<string[] 
     .sort((a, b) => EFFORT_RANK.get(a)! - EFFORT_RANK.get(b)!);
   if (host.length === 0) return undefined;
 
-  // The relay baseline: what the lab publishes for this model, kept only where
-  // this host accepts it. A rung the host offers but the lab does not is
-  // dropped even when it measures as working — that is the doctrine, and the
-  // cost of it is written up on `labEffortValues`.
+  return resolveLadder(id, base, host);
+}
+
+/**
+ * The published ladder for `id`, given the rungs its host schema accepts.
+ * Pure, so the rules can be tested without the network:
+ *
+ * 1. Intersect with the lab's own ladder where it has one. A rung the host
+ *    offers but the lab does not is dropped even when it measures as working
+ *    — that is the doctrine, costed on `labEffortValues`. An empty
+ *    intersection keeps the host enum: it means the lab's rungs are refused
+ *    here, not that no control exists.
+ * 2. `none` is ours, not the lab's: kept only where the lab lists it or a
+ *    probe showed a real off switch (`NONE_IS_REAL_OFF`), lab ladder or not.
+ * 3. A measurement may narrow the result — an accepted rung that turns out
+ *    inert — but never widen it past the lab.
+ */
+export function resolveLadder(id: string, base: string, host: readonly string[]): string[] | undefined {
   const lab = labEffortValues(base);
-  let values = host;
+  let values = [...host];
   if (lab !== undefined && lab.length > 0) {
     const shared = host.filter((value) => lab.includes(value));
-    // An empty intersection means the lab's rungs are all refused here. That
-    // is not "no control", so the host's own enum stands rather than `[]`.
-    values = shared.length > 0 ? shared : host;
+    values = shared.length > 0 ? shared : [...host];
   }
 
-  // `none` is ours, not the lab's, so the intersection strips it. It comes
-  // back only where a probe showed it is a real off switch on this wire.
-  if (host.includes("none") && NONE_IS_REAL_OFF.has(id) && !values.includes("none")) {
-    values = ["none", ...values];
-  }
+  const labListsNone = lab !== undefined && lab.includes("none");
+  const noneAllowed = labListsNone || NONE_IS_REAL_OFF.has(id);
+  if (!noneAllowed) values = values.filter((value) => value !== "none");
+  else if (host.includes("none") && !values.includes("none")) values = ["none", ...values];
 
-  // A measurement may narrow the result further — an accepted rung that turns
-  // out inert — but never widen it past the lab.
   const measured = MEASURED_EFFORTS[id];
   if (measured) values = values.filter((value) => measured.includes(value));
 
