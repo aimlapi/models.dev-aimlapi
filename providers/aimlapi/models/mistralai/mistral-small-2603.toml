@@ -3,7 +3,7 @@ name = "Small 4"
 
 [[reasoning_options]]
 type = "effort"
-values = ["none", "low", "medium", "high"]
+values = ["none", "high"]
 
 [cost]
 input = 0.257888

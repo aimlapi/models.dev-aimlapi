@@ -6,7 +6,7 @@ field = "reasoning_content"
 
 [[reasoning_options]]
 type = "effort"
-values = ["minimal", "low", "medium", "high", "max"]
+values = ["low", "high", "max"]
 
 [cost]
 input = 0.195

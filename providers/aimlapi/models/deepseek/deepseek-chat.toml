@@ -2,10 +2,9 @@ base_model = "deepseek/deepseek-v4-flash"
 
 [[reasoning_options]]
 type = "effort"
-values = ["none", "low", "medium", "high"]
+values = ["low", "high"]
 
 [cost]
 input = 0.39
 output = 1.56
 cache_read = 0.0078
-

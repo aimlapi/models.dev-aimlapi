@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { z } from "zod";
 
 import type { SyncProvider } from "../index.js";
@@ -171,65 +173,6 @@ const EFFORT_NOT_HONOURED: ReadonlySet<string> = new Set([
  * 1M, which the host has since corrected. Kept here so the next reviewer does
  * not spend the same round on it.
  */
-/**
- * Ladders narrowed to the upstream review's lab/peer baseline.
- *
- * These are NOT measurements and are deliberately kept out of
- * `MEASURED_EFFORTS` so the two are never read as the same kind of claim. The
- * review's position is that a relay should publish the control family of the
- * model behind it rather than whatever enum this gateway happens to expose,
- * and for these ids that is the call being followed.
- *
- * Every value is intersected with what the host accepts first, which is the
- * difference from the table this replaces. That earlier one took the baseline
- * verbatim and ended up advertising `max` on DeepSeek V4 and `xhigh` on
- * `qwen3.8-max`, both of which answer 400 here — a caller following the
- * catalogue collected an error. Nothing below is a value this gateway refuses:
- *
- *   deepseek-v4-*        baseline high/max        -> `max` refused, so `high`
- *   deepseek-v4-flash*   baseline low/high/max    -> `low`, `high`
- *   qwen3.8-max          baseline low/medium/xhigh-> `xhigh` refused, so low/medium
- *   gpt-5-pro            baseline high            -> `high`
- *
- * `alibaba/qwen3.8-max` left too, and for the reason the review gave: the
- * forced `low, medium` dropped `high` without ever measuring a rejection of
- * it, and `high` answers 200 here and spends its whole budget reasoning. A
- * rung that works is not ours to remove. Whether the rungs ORDER is still
- * unmeasurable — the model exhausts a 4000-token budget on reasoning and
- * times out at 12000 — and `xhigh`, the lab's top rung, answers 400. So the
- * id goes back to the host's own enum, which is the only statement anyone can
- * actually stand behind for it.
- *
- * The DeepSeek V4 family was here and is not any more. The review asked for
- * the lab set, this table gave it, and the next round objected that doing so
- * "removes caller off/lower rungs that the host reportedly accepted" — which
- * is what the entry's own note had said it cost. Re-probed on that objection:
- * an invalid value is rejected, `none` returns 0 reasoning tokens twice over,
- * `low` returns 4175, `medium` 5563 and `high` 5662. A working off path and a
- * clear step from `none` to `low` to the pair above it.
- *
- * `medium` versus `high` is a different question and it is UNSETTLED. The
- * review objected to keeping `medium` on "near-identical token counts", which
- * was fair on one sample — 5563 against 5662 is under two percent, and the
- * same reasoning removed `low` from `gpt-5.4-pro`. Re-probed for that reason,
- * `medium` came back 7204: its own spread across runs is thirty percent, an
- * order of magnitude wider than the gap being argued about, and `high` timed
- * out on three of four attempts so there is nothing to average against.
- *
- * The two cannot be shown to order and cannot be shown not to. `medium` stays
- * because removing a rung the host accepts needs evidence, and noise larger
- * than the effect is not evidence — in either direction.
- *
- * So the ids go back to the host's own set and the baseline no longer
- * overrides them.
- *
- * Where measurement and baseline disagree, this table is the baseline winning
- * by decision, not by evidence. `deepseek-v4-pro` orders 4374 -> 4936 reasoning
- * tokens between `low` and `high` with the field validated, and `gpt-5-pro`
- * ordered 64/256/320 and 128/192 across repeats; both keep fewer rungs here
- * than those probes support. Restoring the wider sets means deleting the entry.
- */
-const REVIEW_BASELINE_EFFORTS: Readonly<Record<string, readonly string[]>> = {};
 
 /**
  * The OpenAI pro/codex/5.6 batch, probed 2026-09-10 because the review asked
@@ -450,6 +393,8 @@ const INTERLEAVED_FIELD: Readonly<Record<string, "reasoning_content" | "reasonin
   "z-ai/glm-4.7-flash": "reasoning_details",
 };
 
+const PROVIDERS_DIR = path.join(import.meta.dirname, "..", "..", "..", "..", "..", "providers");
+
 const DOCS_CONCURRENCY = 8;
 
 const PricingUnit = z
@@ -636,6 +581,91 @@ function baseModelFor(id: string): string | undefined {
   return BASE_MODEL_OVERRIDES[id] ?? resolveModelMetadataBaseModel(id);
 }
 
+/**
+ * The lab entry's own effort rungs, or `undefined` when it has none.
+ *
+ * This is the baseline the sync now derives from. Where the lab and this host
+ * disagree, the lab wins by construction — and that has a known price, paid
+ * on purpose after seven review rounds asked for it. Rungs this host accepts
+ * AND measurably honours are dropped because the lab does not list them:
+ * `low` on `deepseek-v4-pro` (4175 reasoning tokens against 5662 at `high`),
+ * `high` on `qwen3.8-max` (2000, spending its full budget), `max` on
+ * `gemini-3.7-flash` (6585 against 3841 at `high`, the largest effect measured
+ * anywhere in this file), and `low`/`medium` on `gpt-5-pro` (64/256/320 on a
+ * light prompt). Callers of those ids lose working levels. The measurements
+ * stay in the history so the decision can be reversed with evidence in hand.
+ *
+ * What the doctrine buys is that re-sync cannot reintroduce a rung the lab
+ * does not publish, and that this provider reads like its peers.
+ */
+function labEffortValues(baseModelID: string): readonly string[] | undefined {
+  // The lab's ladder lives on its first-party PROVIDER entry, not on the
+  // shared model record: `models/<lab>/<id>.toml` carries name, family and
+  // capabilities and no `reasoning_options`. So this reads
+  // `providers/<lab>/models/<id>.toml`, the same file a reviewer means when
+  // they say "the lab publishes".
+  const slash = baseModelID.indexOf("/");
+  if (slash === -1) return undefined;
+  const lab = baseModelID.slice(0, slash);
+  const name = baseModelID.slice(slash + 1);
+  // A dated snapshot (`deepseek-v4-pro-0813`) has no lab entry of its own and
+  // is the same control surface as the model it snapshots, so it borrows that
+  // entry's ladder rather than falling through to the host's enum — which is
+  // what left `0813` wider than the sibling it is a copy of.
+  const candidates = [name, name.replace(/-\d{4}$/, "")].filter(
+    (candidate, index, all) => all.indexOf(candidate) === index,
+  );
+  let parsed: Record<string, unknown> | undefined;
+  for (const candidate of candidates) {
+    const file = path.join(PROVIDERS_DIR, lab, "models", `${candidate}.toml`);
+    try {
+      parsed = Bun.TOML.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
+      break;
+    } catch {
+      /* try the next candidate */
+    }
+  }
+  if (parsed === undefined) return undefined;
+  const opts = parsed["reasoning_options"];
+  if (!Array.isArray(opts)) return undefined;
+  const effort = opts.find((o) => o && typeof o === "object" && (o as { type?: unknown }).type === "effort") as
+    | { values?: unknown }
+    | undefined;
+  return Array.isArray(effort?.values) ? (effort!.values as string[]) : undefined;
+}
+
+/**
+ * `gpt-5-pro` is worth a line here because it was argued over the longest.
+ * The lab publishes `["high"]`; this host accepts `low` and `medium` too and
+ * ordered them on a light prompt (64/256/320). The review asked for the same
+ * on a hard prompt before keeping the extras, and that probe cannot be run:
+ * every level times out at the gateway on it, three of three. Under the
+ * intersection the point is moot — the lab set wins and `["high"]` is what
+ * ships — but the light-prompt ordering is real and is recorded so nobody
+ * reads the narrower set as a finding that the rungs did nothing.
+ */
+
+/**
+ * Ids where `reasoning_effort: none` is a measured off switch on this wire —
+ * zero reasoning tokens against a non-zero count at a higher rung, with an
+ * invalid value rejected so the field is known to be read. The lab sets never
+ * carry `none`, so the intersection strips it; this is the only way back in.
+ *
+ * NOT here, deliberately: `claude-sonnet-5`, where `none` maps to `low`, and
+ * `qwen3.8-max`, where it never reported a reasoning count at all.
+ */
+const NONE_IS_REAL_OFF: ReadonlySet<string> = new Set([
+  "deepseek/deepseek-v4-pro",
+  "deepseek/deepseek-v4-pro-0813",
+  "openai/gpt-5.3-codex",
+  "openai/gpt-5.6-luna",
+  "openai/gpt-5.6-sol",
+  "openai/gpt-5.6-terra",
+  "openai/gpt-5.6-terra-pro",
+  "anthropic/claude-opus-4.7",
+  "anthropic/claude-opus-4.8",
+]);
+
 function baseReasoning(baseModelID: string): boolean {
   try {
     return modelMetadata(baseModelID).reasoning === true;
@@ -680,7 +710,7 @@ function positive(value: number | null | undefined): number | undefined {
  * and claude-opus-4.8, and `none` on the gemini flash models. The union across
  * every occurrence is what the endpoint actually accepts.
  */
-async function fetchReasoningEffort(id: string): Promise<string[] | undefined> {
+async function fetchReasoningEffort(id: string, base: string): Promise<string[] | undefined> {
   const url = `${DOCS_ENDPOINT}?model=${encodeURIComponent(id)}&endpoint=${encodeURIComponent(CHAT_COMPLETIONS_TYPE)}`;
   let payload: unknown;
   try {
@@ -693,20 +723,38 @@ async function fetchReasoningEffort(id: string): Promise<string[] | undefined> {
 
   if (EFFORT_NOT_HONOURED.has(id) || EFFORT_VALIDATED_BUT_INERT.has(id)) return undefined;
 
-  // Baseline first: where the review has overruled the schema for an id, that
-  // is the published set, and the measured table below is what it overrules.
-  const baseline = REVIEW_BASELINE_EFFORTS[id];
-  if (baseline) return [...baseline];
-
-  const measured = MEASURED_EFFORTS[id];
-  if (measured) return [...measured];
-
   const found = new Set<string>();
   collectReasoningEffortEnums(payload, found);
 
-  const values = [...found]
+  const host = [...found]
     .filter((value) => EFFORT_RANK.has(value))
     .sort((a, b) => EFFORT_RANK.get(a)! - EFFORT_RANK.get(b)!);
+  if (host.length === 0) return undefined;
+
+  // The relay baseline: what the lab publishes for this model, kept only where
+  // this host accepts it. A rung the host offers but the lab does not is
+  // dropped even when it measures as working — that is the doctrine, and the
+  // cost of it is written up on `labEffortValues`.
+  const lab = labEffortValues(base);
+  let values = host;
+  if (lab !== undefined && lab.length > 0) {
+    const shared = host.filter((value) => lab.includes(value));
+    // An empty intersection means the lab's rungs are all refused here. That
+    // is not "no control", so the host's own enum stands rather than `[]`.
+    values = shared.length > 0 ? shared : host;
+  }
+
+  // `none` is ours, not the lab's, so the intersection strips it. It comes
+  // back only where a probe showed it is a real off switch on this wire.
+  if (host.includes("none") && NONE_IS_REAL_OFF.has(id) && !values.includes("none")) {
+    values = ["none", ...values];
+  }
+
+  // A measurement may narrow the result further — an accepted rung that turns
+  // out inert — but never widen it past the lab.
+  const measured = MEASURED_EFFORTS[id];
+  if (measured) values = values.filter((value) => measured.includes(value));
+
   return values.length > 0 ? values : undefined;
 }
 
@@ -747,7 +795,9 @@ async function attachReasoningEffort(models: AimlapiModel[]): Promise<void> {
     while (cursor < pending.length) {
       const model = pending[cursor++];
       if (model === undefined) return;
-      model.reasoningEffort = await fetchReasoningEffort(model.id);
+      const base = baseModelFor(model.id);
+      if (base === undefined) continue;
+      model.reasoningEffort = await fetchReasoningEffort(model.id, base);
     }
   });
   await Promise.all(workers);
