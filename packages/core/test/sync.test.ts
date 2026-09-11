@@ -923,6 +923,36 @@ test("parses current and future Anthropic pricing rows", () => {
   expect(standard.get("claude sonnet 5")).toMatchObject({ input: 3, output: 15 });
 });
 
+test.each([
+  "| Model | Base input tokens | 5m cache writes | 1h cache writes | Cache hits and refreshes | Output tokens |",
+  "| Model | Base input tokens | 5m cache writes | 1h cache writes | Cache hits & refreshes | Output tokens |",
+  "| Model | Base Input Tokens | 5m Cache Writes | 1h Cache Writes | Cache Hits and Refreshes | Output Tokens |",
+])("parses Anthropic pricing with header %s", (header) => {
+  const markdown = anthropicPricingMarkdown.replace(/^\| Model \|.*$/m, header);
+  const pricing = parseAnthropicPricing(markdown, new Date("2026-09-03T00:00:00Z"));
+
+  expect(pricing.size).toBe(5);
+  expect(pricing.get("claude opus 4.8")).toEqual({
+    input: 5,
+    output: 25,
+    cacheRead: 0.5,
+    cacheWrite: 6.25,
+    deprecated: false,
+  });
+});
+
+test.each([
+  "Model",
+  "Base Input Tokens",
+  "5m Cache Writes",
+  "Cache Hits & Refreshes",
+  "Output Tokens",
+])("rejects Anthropic pricing without the %s column", (column) => {
+  const markdown = anthropicPricingMarkdown.replace(`| ${column} |`, "| Unknown |");
+
+  expect(() => parseAnthropicPricing(markdown)).toThrow("Anthropic model pricing table has unexpected columns");
+});
+
 test("syncs Anthropic capabilities and exact effort levels", () => {
   const model = buildAnthropicModel(anthropicModel(), {
     name: "Claude Sonnet 5",
@@ -1830,7 +1860,36 @@ test("resolves DigitalOcean IDs to canonical model metadata", () => {
   expect(resolveDigitalOceanBaseModel("mimo-v2.5-pro")).toBe("xiaomi/mimo-v2.5-pro");
   expect(resolveDigitalOceanBaseModel("anthropic-claude-5-sonnet")).toBe("anthropic/claude-sonnet-5");
   expect(resolveDigitalOceanBaseModel("anthropic-claude-opus-5")).toBe("anthropic/claude-opus-5");
+  expect(resolveDigitalOceanBaseModel("anthropic-claude-fable-5.1")).toBe("anthropic/claude-fable-5-1");
+  expect(resolveDigitalOceanBaseModel("anthropic-claude-5.1-fable")).toBe("anthropic/claude-fable-5-1");
+  expect(resolveDigitalOceanBaseModel("anthropic-claude-unknown-99.1")).toBeUndefined();
   expect(resolveDigitalOceanBaseModel("openai-gpt-5.6-luna")).toBe("openai/gpt-5.6-luna");
+});
+
+test("new DigitalOcean Fable models emit only base metadata overrides", () => {
+  const translated = digitalocean.translateModel(
+    digitalOceanModel({
+      id: "anthropic-claude-fable-5.1",
+      name: "Anthropic Claude Fable 5.1",
+      reasoning_efforts: ["low", "medium", "high", "xhigh", "max"],
+      modalities: { input: ["text", "image"], output: ["text"] },
+      max_output_tokens: 128_000,
+      created_at: "2026-09-01T00:00:00Z",
+      pricing: { input: 10, output: 50, cacheRead: 0.25, cacheWrite: 12.5 },
+    }),
+    { existing: () => undefined, authored: () => undefined },
+  );
+
+  expect(translated).toEqual({
+    id: "anthropic-claude-fable-5.1",
+    model: {
+      base_model: "anthropic/claude-fable-5-1",
+      name: "Anthropic Claude Fable 5.1",
+      reasoning_options: [{ type: "effort", values: ["low", "medium", "high", "xhigh", "max"] }],
+      cost: { input: 10, output: 50, cache_read: 0.25, cache_write: 12.5 },
+      modalities: { input: ["text", "image"] },
+    },
+  });
 });
 
 test("new DigitalOcean base models inherit intrinsic capabilities", () => {
@@ -2554,7 +2613,112 @@ test("names Eden AI regional deployments after the canonical model", () => {
     ),
   ).toMatchObject({
     base_model: "anthropic/claude-opus-5",
-    name: "Claude Opus 5 (EU)",
+    name: "Claude Opus 5 (Amazon Bedrock, EU)",
+  });
+});
+
+test("names Eden AI latest aliases as Latest plus the current target", () => {
+  expect(
+    buildEdenAIModel(
+      edenAIModel({
+        id: "anthropic/claude-fable-latest",
+        model_name: "claude-fable-5-1",
+        owned_by: "anthropic",
+        alias_of: "anthropic/claude-fable-5-1",
+      }),
+    ),
+  ).toMatchObject({
+    base_model: "anthropic/claude-fable-5-1",
+    name: "Claude Fable Latest (Claude Fable 5.1)",
+  });
+  expect(
+    buildEdenAIModel(
+      edenAIModel({
+        id: "openai/gpt-latest",
+        model_name: "gpt-6-astra",
+        owned_by: "openai",
+        alias_of: "openai/gpt-6-astra",
+      }),
+    ),
+  ).toMatchObject({
+    base_model: "openai/gpt-6-astra",
+    name: "GPT Latest (GPT-6 Astra)",
+  });
+  expect(
+    buildEdenAIModel(
+      edenAIModel({
+        id: "vertex/gemini-flash-latest@us",
+        model_name: "gemini-3.8-flash",
+        owned_by: "vertex",
+        alias_of: "vertex/gemini-3.8-flash",
+      }),
+    ),
+  ).toMatchObject({
+    base_model: "google/gemini-3.8-flash",
+    name: "Gemini Flash Latest (Gemini 3.8 Flash, Vertex AI, US)",
+  });
+});
+
+test("names Eden AI non-primary hosts distinctly from the lab route", () => {
+  expect(
+    buildEdenAIModel(
+      edenAIModel({
+        id: "google/gemini-3.8-flash",
+        model_name: "gemini-3.8-flash",
+        owned_by: "google",
+      }),
+    ),
+  ).not.toHaveProperty("name");
+  expect(
+    buildEdenAIModel(
+      edenAIModel({
+        id: "vertex/gemini-3.8-flash",
+        model_name: "gemini-3.8-flash",
+        owned_by: "vertex",
+      }),
+    ),
+  ).toMatchObject({
+    base_model: "google/gemini-3.8-flash",
+    name: "Gemini 3.8 Flash (Vertex AI)",
+  });
+  expect(
+    buildEdenAIModel(
+      edenAIModel({
+        id: "vertex/gemini-3.8-flash@us",
+        model_name: "gemini-3.8-flash",
+        owned_by: "vertex",
+      }),
+    ),
+  ).toMatchObject({
+    base_model: "google/gemini-3.8-flash",
+    name: "Gemini 3.8 Flash (Vertex AI, US)",
+  });
+  expect(
+    buildEdenAIModel(
+      edenAIModel({
+        id: "deepinfra/openai/gpt-oss-120b",
+        model_name: "openai/gpt-oss-120b",
+        owned_by: "deepinfra",
+      }),
+    ),
+  ).toMatchObject({
+    base_model: "openai/gpt-oss-120b",
+    name: "GPT OSS 120B (Deep Infra)",
+  });
+});
+
+test("does not treat Eden AI case-only aliases as latest pointers", () => {
+  const built = buildEdenAIModel(
+    edenAIModel({
+      id: "flexai/deepseek-v4-flash-0731",
+      model_name: "DeepSeek-V4-Flash-0731",
+      owned_by: "flexai",
+      alias_of: "flexai/DeepSeek-V4-Flash-0731",
+    }),
+  );
+  expect(built).toMatchObject({
+    base_model: "deepseek/deepseek-v4-flash-0731",
+    name: "DeepSeek V4 Flash 0731 (FlexAI)",
   });
 });
 
@@ -2616,9 +2780,15 @@ test("keeps every Eden AI route for models with no first-party relay", () => {
 
   const firstParty = collectFirstPartyBaseModels(models);
   expect(firstParty.size).toBe(0);
+  const names = {
+    deepinfra: "GPT OSS 120B (Deep Infra)",
+    groq: "GPT OSS 120B (Groq)",
+    cerebras: "GPT OSS 120B (Cerebras)",
+  };
   for (const model of models) {
     expect(buildEdenAIModel(model, undefined, firstParty)).toMatchObject({
       base_model: "openai/gpt-oss-120b",
+      name: names[model.owned_by as keyof typeof names],
     });
   }
 });
@@ -3003,6 +3173,14 @@ test("factors OpenRouter Pro routes against canonical OpenAI metadata", () => {
   });
   expect("family" in model).toBe(false);
   expect("release_date" in model).toBe(false);
+});
+
+test("resolves dotted Claude versions without a family allowlist", () => {
+  expect(resolveCanonicalBaseModel("anthropic/claude-fable-5.1")).toBe("anthropic/claude-fable-5-1");
+  expect(resolveCanonicalBaseModel("anthropic/claude-fable-5.1-fast")).toBe("anthropic/claude-fable-5-1");
+  expect(resolveCanonicalBaseModel("anthropic/claude-opus-4.6")).toBe("anthropic/claude-opus-4-6");
+  expect(resolveCanonicalBaseModel("anthropic/claude-3.5-sonnet-20241022")).toBe("anthropic/claude-3-5-sonnet-20241022");
+  expect(resolveCanonicalBaseModel("anthropic/claude-unknown-99.1")).toBeUndefined();
 });
 
 test("resolves SpaceXAI provider IDs to canonical xAI metadata", () => {
@@ -3567,6 +3745,56 @@ test("strips image input when the deployment has no vision", () => {
     attachment: false,
     modalities: { input: ["text"], output: ["text"] },
   });
+});
+
+test("keeps the last LLM Gateway entry for case-insensitive duplicate IDs", () => {
+  const first = llmGatewayModel({ id: "qwen3.8-27b", family: "alibaba" });
+  const other = llmGatewayModel();
+  for (const id of [first.id, "Qwen3.8-27B"]) {
+    const last = llmGatewayModel({
+      id,
+      family: "consensusprotocol",
+      context_length: 32_768,
+      pricing: { prompt: "0.41e-6", completion: "2.5e-6" },
+    });
+    expect(llmgateway.parseModels({ data: [first, other, last] })).toEqual([last, other]);
+    expect(llmgateway.parseModels({ data: [last, other, first] })).toEqual([first, other]);
+  }
+  const nonText = llmGatewayModel({
+    id: first.id,
+    architecture: { input_modalities: ["text"], output_modalities: ["image"] },
+  });
+  expect(llmgateway.parseModels({ data: [first, nonText] })).toEqual([first]);
+});
+
+test("syncs the last LLM Gateway case variant without mixing source records", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "models-dev-llmgateway-case-"));
+  const modelsDir = path.join(root, "providers", "llmgateway", "models");
+  await mkdir(modelsDir, { recursive: true });
+  const first = llmGatewayModel({ id: "qwen3.8-27b", family: undefined });
+  const last = llmGatewayModel({
+    id: "Qwen3.8-27B",
+    family: undefined,
+    context_length: 32_768,
+    pricing: { prompt: "0.41e-6", completion: "2.5e-6" },
+  });
+  const provider = { ...llmgateway, modelsDir, fetchModels: async () => ({ data: [first, last] }) };
+
+  try {
+    await syncProvider({ ...provider, fetchModels: async () => ({ data: [first] }) });
+    const result = await syncProvider(provider);
+    expect(result).toMatchObject({ created: 1, updated: 0, deleted: 1 });
+    expect(await Bun.file(path.join(modelsDir, `${first.id}.toml`)).exists()).toBe(false);
+    const written = Bun.TOML.parse(await readFile(path.join(modelsDir, `${last.id}.toml`), "utf8"));
+    expect(written).toMatchObject({
+      cost: { input: 0.41, output: 2.5 },
+      limit: { context: 32_768 },
+    });
+    expect(written.cost).not.toHaveProperty("cache_write");
+    expect(await syncProvider(provider)).toMatchObject({ created: 0, updated: 0, deleted: 0, unchanged: 1 });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("refuses empty responses in both LLM Gateway syncs", () => {

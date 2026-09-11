@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { ReasoningOption } from "../../schema.js";
 import type { ExistingModel, SyncProvider, SyncedBaseModel } from "../index.js";
+import { MissingReasoningOptionsError } from "../missing-reasoning-options.js";
 
 const API_BASE = "https://api.cloudflare.com/client/v4/accounts";
 const PROVIDER_DIR = path.join(
@@ -148,6 +149,8 @@ export function buildCloudflareAiGatewayModel(
   existing?: ExistingModel,
 ): SyncedBaseModel {
   const id = catalog.model_id;
+  // Pricing failures must not be hidden by missing reasoning controls.
+  const cost = proxiedCost(catalog.pricing, id);
   const baseModel = curated.base_model ?? resolveBaseModel(id);
   if (baseModel === undefined) {
     throw new Error(`${id}: no lab file and no curated base_model; add it to skip or map it`);
@@ -163,14 +166,15 @@ export function buildCloudflareAiGatewayModel(
     const derived = deriveReasoningOptions(schemaInput);
     const reasoningOptions = curated.reasoning_options ?? (derived.length > 0 ? derived : undefined);
     if (reasoningOptions === undefined) {
-      throw new Error(
-        `${id}: base ${baseModel} reasons but the catalog schema and curation provide no reasoning_options`,
+      throw new MissingReasoningOptionsError(
+        id,
+        `base ${baseModel} reasons but the catalog schema and curation provide no reasoning_options`,
       );
     }
     model.reasoning_options = reasoningOptions;
   }
 
-  model.cost = proxiedCost(catalog.pricing, id);
+  model.cost = cost;
 
   const limit = {
     ...(catalog.context_length == null && existing?.limit?.context === undefined
