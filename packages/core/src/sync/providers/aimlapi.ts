@@ -352,6 +352,10 @@ const MEASURED_EFFORTS: Readonly<Record<string, readonly string[]>> = {
   // lost `low` for it. Two rules for one situation is worse than either rule.
   // `none` (0 twice) and `low` (4175 against 5662) stay: those are measured.
   "deepseek/deepseek-v4-pro": ["none", "low", "high"],
+  // Same cut on the dated snapshot, measured rather than copied: `medium`
+  // exhausted a 4000-token budget on reasoning twice while `high` used 2318.
+  // A rung that spends more than the one above it is not a lower rung.
+  "deepseek/deepseek-v4-pro-0813": ["none", "low", "high"],
   "openai/o1": ["low", "medium", "high"],
   "openai/o3-mini": ["low", "medium", "high"],
 };
@@ -369,6 +373,15 @@ const MEASURED_EFFORTS: Readonly<Record<string, readonly string[]>> = {
  * reading the keys actually present on the response message rather than by
  * family: 14 return `reasoning_content`, 44 return `reasoning_details`
  * alongside `reasoning`.
+ *
+ * Six ids the review asked about — `deepseek-chat`, the base `gpt-5.6-luna`,
+ * `-sol` and `-terra`, `o1` and `o3-mini` — return NO side channel, and that
+ * was re-checked under forced reasoning so it could not be the prompt: `o1`
+ * spent 2500 reasoning tokens and `gpt-5.6-luna` 1023 with nothing beside
+ * `content` on the message. The `-pro` siblings that do declare a field reach
+ * OpenRouter, which exposes one; the base ids reach OpenAI natively, which
+ * does not. Same family, different link, different wire. `deepseek-chat` is
+ * non-thinking by default and produced no reasoning tokens at all.
  *
  * Fifteen more return a bare `reasoning`, and two Gemini Flash ids return
  * `extra_content`. Neither name is in the schema's enum, so those stay unset —

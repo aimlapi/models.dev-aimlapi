@@ -5,7 +5,7 @@ field = "reasoning_details"
 
 [[reasoning_options]]
 type = "effort"
-values = ["none", "low", "medium", "high"]
+values = ["none", "low", "high"]
 
 [cost]
 input = 2.393196
