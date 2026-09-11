@@ -27,7 +27,9 @@ const CHAT_COMPLETIONS_TYPE = "openai/chat-completions";
 // reader expects to see them. Anything the API documents outside this set is
 // dropped rather than coerced.
 const EFFORT_VALUES = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "default"] as const;
+type EffortValue = (typeof EFFORT_VALUES)[number];
 const EFFORT_RANK = new Map(EFFORT_VALUES.map((value, index) => [value as string, index]));
+const isEffortValue = (value: string): value is EffortValue => EFFORT_RANK.has(value);
 
 /**
  * Models whose documented schema and whose live behaviour disagree, with what
@@ -989,7 +991,7 @@ export const aimlapi = {
     // Required whenever the base model reasons. Only the API's own request
     // schema can say which values it takes, so a model whose docs stay silent
     // is skipped rather than given an invented control.
-    let reasoningOptions: Array<{ type: "effort"; values: string[] }> | undefined;
+    let reasoningOptions: Array<{ type: "effort"; values: EffortValue[] }> | undefined;
     if (baseReasoning(base)) {
       // A model that reasons but honours no caller control gets an empty list:
       // the schema requires the field, and an empty one states the truth —
@@ -997,7 +999,7 @@ export const aimlapi = {
       if (EFFORT_NOT_HONOURED.has(model.id) || EFFORT_VALIDATED_BUT_INERT.has(model.id)) {
         reasoningOptions = [];
       } else {
-        const values = model.reasoningEffort ?? undefined;
+        const values = model.reasoningEffort?.filter(isEffortValue);
         if (values === undefined || values.length === 0) return undefined;
         reasoningOptions = [{ type: "effort", values }];
       }
@@ -1015,19 +1017,29 @@ export const aimlapi = {
       STALE_HOST_ROW.has(model.id) ||
       (contextLimit === undefined && outputLimit === undefined)
         ? undefined
-        : { context: contextLimit, output: outputLimit };
+        : {
+            ...(contextLimit === undefined ? {} : { context: contextLimit }),
+            ...(outputLimit === undefined ? {} : { output: outputLimit }),
+          };
 
     // Everything else — the capability flags, description, dates, modalities —
     // is the lab's to state and is inherited. factorBaseModel drops whatever
     // matches the base, so the file carries only what is genuinely ours.
+    // A row the host lists but does not price is not sellable through it, and
+    // the schema (rightly) will not carry a card without a price. Skip it
+    // rather than invent zeros.
+    const inputCost = perMillion(units, "provided") ?? existing?.cost?.input;
+    const outputCost = perMillion(units, "generated") ?? existing?.cost?.output;
+    if (inputCost === undefined || outputCost === undefined) return undefined;
+
     return {
       id: model.id,
       model: factorBaseModel(
         base,
         {
           cost: {
-            input: perMillion(units, "provided") ?? existing?.cost?.input,
-            output: perMillion(units, "generated") ?? existing?.cost?.output,
+            input: inputCost,
+            output: outputCost,
             cache_read: perMillion(units, "cached") ?? existing?.cost?.cache_read,
           },
           // Aliases such as `-pro` and `-fast` factor onto the base model and

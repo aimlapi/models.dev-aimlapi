@@ -11,6 +11,3 @@ values = ["low", "medium", "high"]
 input = 1.71925
 output = 5.84545
 cache_read = 0.20631
-
-[limit]
-context = 1_048_576
