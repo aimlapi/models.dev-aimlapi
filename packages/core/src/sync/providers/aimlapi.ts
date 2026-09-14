@@ -598,23 +598,56 @@ function isChatTextModel(model: AimlapiModel): boolean {
  * and limits; this is the same correction on the catalogue side.
  */
 /**
- * Ids whose host ROW is known stale, so the lab entry is the better source.
+ * Ids whose host ROW must not override the lab entry it factors onto.
  *
- * Only `deepseek/deepseek-chat`, and only until the host's own correction
- * ships: production still calls it "DeepSeek V3" with a 128K window while
- * serving a Flash build that has 1M, and republishing either beside a Flash
- * `base_model` would put a contradiction in the catalogue. Name and limits are
- * both suppressed so the lab entry's own figures inherit. The fix upstream is
- * merged, and when it lands this set can go — the host will be saying the
- * right thing itself.
+ * Only `deepseek/deepseek-chat`. The host has corrected its row since this
+ * began (it now reads "DeepSeek Chat (V4.1 Flash)", 1,048,576 context), but
+ * republishing either beside the Flash `base_model` would still contradict
+ * it: the lab has folded its Flash ids into V4.1 and lists the window as
+ * 1,000,000, and the host's 1,048,576 is a rounding of that same window, not a
+ * different one. Name and limits stay suppressed so the alias inherits the
+ * lab's figures exactly as `deepseek-v4-flash` does.
  */
 const STALE_HOST_ROW: ReadonlySet<string> = new Set([
   "deepseek/deepseek-chat",
 ]);
 
+/**
+ * Ids whose host display NAME is stale while the rest of the row is fine.
+ *
+ * `google/gemini-2.5-flash-lite` still reads "Gemini 2.5 Flash Lite Preview"
+ * on the host although the route serves the GA model the lab entry names
+ * "Gemini 2.5 Flash-Lite" — a label left over from its preview period, the
+ * same mistake corrected for `openai/o1`. The host-side fix is open
+ * (aimlapi/aimlapi#6178); until it ships the override is dropped so the lab's
+ * name inherits. Limits and everything else still come from the host row.
+ */
+const STALE_HOST_NAME: ReadonlySet<string> = new Set([
+  "google/gemini-2.5-flash-lite",
+]);
+
 const BASE_MODEL_OVERRIDES: Readonly<Record<string, string>> = {
   "deepseek/deepseek-chat": "deepseek/deepseek-v4-flash",
 };
+
+/**
+ * Ids that are aliases of another host id on the wire, keyed to the id whose
+ * measurements they share. `deepseek-chat` answers `"model": "deepseek-flash"`
+ * exactly as `deepseek-v4-flash` does, so every probe run against the latter
+ * — which rungs are honoured, whether `none` switches reasoning off, which
+ * field carries the chain of thought — holds for the alias, and the two cards
+ * must resolve identically rather than the alias falling through to the
+ * unmeasured default. Only the measurement tables read through this map; the
+ * host row itself (name, limits, allowlists) stays keyed by the alias's own id.
+ */
+const WIRE_ALIAS_OF: Readonly<Record<string, string>> = {
+  "deepseek/deepseek-chat": "deepseek/deepseek-v4-flash",
+};
+
+/** The id whose measurements apply to `id`: its wire alias target, else itself. */
+function measuredAs(id: string): string {
+  return WIRE_ALIAS_OF[id] ?? id;
+}
 
 function baseModelFor(id: string): string | undefined {
   return BASE_MODEL_OVERRIDES[id] ?? resolveModelMetadataBaseModel(id);
@@ -811,7 +844,8 @@ async function fetchReasoningEffort(id: string, base: string): Promise<string[] 
     return undefined;
   }
 
-  if (EFFORT_NOT_HONOURED.has(id) || EFFORT_VALIDATED_BUT_INERT.has(id)) return undefined;
+  const measuredId = measuredAs(id);
+  if (EFFORT_NOT_HONOURED.has(measuredId) || EFFORT_VALIDATED_BUT_INERT.has(measuredId)) return undefined;
 
   const found = new Set<string>();
   collectReasoningEffortEnums(payload, found);
@@ -872,12 +906,13 @@ export function resolveLadder(id: string, base: string, host: readonly string[])
       break;
   }
 
+  const measuredId = measuredAs(id);
   const labListsNone = lab !== undefined && lab.includes("none");
-  const noneAllowed = labListsNone || NONE_IS_REAL_OFF.has(id);
+  const noneAllowed = labListsNone || NONE_IS_REAL_OFF.has(measuredId);
   if (!noneAllowed) values = values.filter((value) => value !== "none");
   else if (host.includes("none") && !values.includes("none")) values = ["none", ...values];
 
-  const measured = MEASURED_EFFORTS[id];
+  const measured = MEASURED_EFFORTS[measuredId];
   if (measured) values = values.filter((value) => measured.includes(value));
 
   return values.length > 0 ? values : undefined;
@@ -996,7 +1031,7 @@ export const aimlapi = {
       // A model that reasons but honours no caller control gets an empty list:
       // the schema requires the field, and an empty one states the truth —
       // reasoning happens, nothing about it is selectable.
-      if (EFFORT_NOT_HONOURED.has(model.id) || EFFORT_VALIDATED_BUT_INERT.has(model.id)) {
+      if (EFFORT_NOT_HONOURED.has(measuredAs(model.id)) || EFFORT_VALIDATED_BUT_INERT.has(measuredAs(model.id))) {
         reasoningOptions = [];
       } else {
         const values = model.reasoningEffort?.filter(isEffortValue);
@@ -1046,10 +1081,11 @@ export const aimlapi = {
           // would inherit its display name, so the catalogue would list two rows
           // called "GPT-5.6 Luna". The host names them apart; carry that through
           // and the override drops itself when the names already agree.
-          name: STALE_HOST_ROW.has(model.id) ? undefined : (info.name ?? undefined),
+          name:
+            STALE_HOST_ROW.has(model.id) || STALE_HOST_NAME.has(model.id) ? undefined : (info.name ?? undefined),
           reasoning_options: reasoningOptions,
-          interleaved: INTERLEAVED_FIELD[model.id]
-            ? { field: INTERLEAVED_FIELD[model.id]! }
+          interleaved: INTERLEAVED_FIELD[measuredAs(model.id)]
+            ? { field: INTERLEAVED_FIELD[measuredAs(model.id)]! }
             : undefined,
           limit,
         },

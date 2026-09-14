@@ -76,3 +76,14 @@ test("an empty intersection is unresolved, not the host enum", () => {
 test("a base with no lab entry keeps the host enum — there is nothing to contradict", () => {
   expect(resolveLadder("some/model", "nolab/nothing-here", ["low", "high"])).toEqual(["low", "high"]);
 });
+
+test("a wire alias resolves through the measurements of the id it answers as", () => {
+  const host = ["none", "low", "medium", "high"];
+  // `deepseek-chat` answers `"model": "deepseek-flash"` exactly as
+  // `deepseek-v4-flash` does, so the probes run against the latter (`none`
+  // switches reasoning off; `medium` is inert) apply to the alias too.
+  expect(resolveLadder("deepseek/deepseek-chat", "deepseek/deepseek-v4-flash", host)).toEqual(
+    resolveLadder("deepseek/deepseek-v4-flash", "deepseek/deepseek-v4-flash", host),
+  );
+  expect(resolveLadder("deepseek/deepseek-chat", "deepseek/deepseek-v4-flash", host)).toEqual(["none", "low", "high"]);
+});
