@@ -6,6 +6,7 @@ import type { SyncProvider } from "../index.js";
 import {
   factorBaseModel,
   modelMetadata,
+  openrouterDirsForMetadataLab,
   providerDirForMetadataLab,
   resolveModelMetadataBaseModel,
 } from "./openrouter.js";
@@ -672,9 +673,9 @@ function baseModelFor(id: string): string | undefined {
  */
 /** What the lab's provider entry says about effort, three ways. */
 export type LabLadder =
-  | { kind: "effort"; values: readonly string[] }
-  | { kind: "no-effort" } // the entry exists and lists toggle/budget only
-  | { kind: "no-entry" }; // no first-party provider entry for this base
+  | { kind: "effort"; values: readonly string[]; source: "lab" | "peer" }
+  | { kind: "no-effort"; source: "lab" | "peer" } // the entry exists and lists toggle/budget only
+  | { kind: "no-entry" }; // neither a first-party nor an OpenRouter entry for this base
 
 export function labEffortValues(baseModelID: string): readonly string[] | undefined {
   const ladder = labLadder(baseModelID);
@@ -702,9 +703,29 @@ export function labLadder(baseModelID: string): LabLadder {
   const candidates = [name, name.replace(/-\d{4}$/, "")].filter(
     (candidate, index, all) => all.indexOf(candidate) === index,
   );
+  const own = readLadder(lab, candidates, "lab");
+  if (own.kind !== "no-entry") return own;
+  // No first-party entry. The next-best baseline is an established peer on
+  // the same surface: OpenRouter's card for the same lab id, which the review
+  // names as the reference whenever the lab is silent. Its ladder is used
+  // exactly like a lab ladder — intersected, never widened — and its
+  // toggle-only cards count as "no effort ladder" just as a lab's would.
+  // OpenRouter files Alibaba under `qwen/`, so every directory it uses for
+  // the lab is tried. Only when neither exists is the model unresolved.
+  const metadataLab = baseModelID.slice(0, slash);
+  const peerPaths = openrouterDirsForMetadataLab(metadataLab).flatMap((dir) =>
+    candidates.map((candidate) => `${dir}/${candidate}`),
+  );
+  return readLadder(PEER_DIR, peerPaths, "peer");
+}
+
+/** OpenRouter's provider directory: the peer baseline when the lab is silent. */
+const PEER_DIR = "openrouter";
+
+function readLadder(providerDir: string, modelPaths: readonly string[], source: "lab" | "peer"): LabLadder {
   let parsed: Record<string, unknown> | undefined;
-  for (const candidate of candidates) {
-    const file = path.join(PROVIDERS_DIR, lab, "models", `${candidate}.toml`);
+  for (const candidate of modelPaths) {
+    const file = path.join(PROVIDERS_DIR, providerDir, "models", `${candidate}.toml`);
     try {
       parsed = Bun.TOML.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
       break;
@@ -718,7 +739,9 @@ export function labLadder(baseModelID: string): LabLadder {
   const effort = opts.find((o) => o && typeof o === "object" && (o as { type?: unknown }).type === "effort") as
     | { values?: unknown }
     | undefined;
-  return Array.isArray(effort?.values) ? { kind: "effort", values: effort!.values as string[] } : { kind: "no-effort" };
+  return Array.isArray(effort?.values)
+    ? { kind: "effort", values: effort!.values as string[], source }
+    : { kind: "no-effort", source };
 }
 
 /**
@@ -876,6 +899,9 @@ export function resolveLadder(id: string, base: string, host: readonly string[])
   const ladder = labLadder(base);
   let values: string[];
   let lab: readonly string[] | undefined;
+  // A peer's `none` is that relay's own off mapping, not the lab's word that
+  // the rung exists; it is not taken on trust the way a lab-listed `none` is.
+  const labSpeaks = ladder.kind !== "no-entry" && ladder.source === "lab";
 
   switch (ladder.kind) {
     case "effort": {
@@ -899,15 +925,15 @@ export function resolveLadder(id: string, base: string, host: readonly string[])
       values = [...host];
       break;
     case "no-entry":
-      // Nothing to contradict: the lab does not publish this model, so the
-      // host's enum is the only ladder anyone has for it. Kept, on the
-      // understanding that "invented relative to the lab" needs a lab.
-      values = [...host];
-      break;
+      // Neither the lab nor the peer publishes a ladder for this model, so
+      // there is nothing to intersect with and the host's enum would ship as
+      // a bare schema dump. Unresolved: the model is skipped until a baseline
+      // exists rather than given boilerplate rungs.
+      return undefined;
   }
 
   const measuredId = measuredAs(id);
-  const labListsNone = lab !== undefined && lab.includes("none");
+  const labListsNone = labSpeaks && lab !== undefined && lab.includes("none");
   const noneAllowed = labListsNone || NONE_IS_REAL_OFF.has(measuredId);
   if (!noneAllowed) values = values.filter((value) => value !== "none");
   else if (host.includes("none") && !values.includes("none")) values = ["none", ...values];
@@ -963,6 +989,46 @@ async function attachReasoningEffort(models: AimlapiModel[]): Promise<void> {
   await Promise.all(workers);
 }
 
+/**
+ * The leading comment a card carries so a reader can see what the wire does
+ * without opening this file. Only cards whose control story is not plain
+ * "lab ladder ∩ host enum" get one — the ones a review has to ask about.
+ */
+function wireHeader(id: string, reasoningOptions: Array<{ type: "effort"; values: EffortValue[] }> | undefined): string | undefined {
+  const measuredId = measuredAs(id);
+  const lines: string[] = [];
+  if (measuredId !== id) {
+    lines.push(`# Alias: answers "model" as ${measuredId.slice(measuredId.indexOf("/") + 1)}; measured through that id.`);
+  }
+  if (reasoningOptions !== undefined && reasoningOptions.length === 0) {
+    lines.push(
+      EFFORT_NOT_HONOURED.has(measuredId)
+        ? "# No caller control: reasoning_effort is not read (an invalid value returns 200),"
+        : "# No caller control: reasoning_effort is validated (invalid value -> 400) but low/high",
+      EFFORT_NOT_HONOURED.has(measuredId)
+        ? "# and toggle/budget fields are dropped by the gateway (unknown top-level keys -> 200)."
+        : "# do not order reasoning tokens; toggle/budget fields are dropped by the gateway.",
+    );
+  }
+  if (HOST_EFFORT_LIVE.has(measuredId)) {
+    lines.push(
+      ...(measuredId.startsWith("alibaba/")
+        ? [
+            "# Effort names select the lab's thinking budget on this wire (low = 8192, medium = 32768",
+            "# thinking_budget per the gateway's own 400 text); no separate toggle/budget field.",
+          ]
+        : [
+            "# Effort orders reasoning tokens on this wire (low 863 -> high 2399 measured);",
+            "# no separate toggle/budget field, unknown top-level keys are dropped.",
+          ]),
+    );
+  }
+  if (NONE_IS_REAL_OFF.has(measuredId)) {
+    lines.push("# Off: reasoning_effort = none (0 reasoning tokens); no toggle field on this surface.");
+  }
+  return lines.length > 0 ? lines.join("\n") + "\n" : undefined;
+}
+
 export const aimlapi = {
   id: "aimlapi",
   name: "AI/ML API",
@@ -970,6 +1036,7 @@ export const aimlapi = {
   // The catalog turns over quickly and lists far more than the chat surface, so
   // a local model missing from one response is not proof that it is gone.
   deleteMissing: false,
+  authoritativeHeaders: true,
   sourceID(model) {
     if (NOT_CALLABLE.has(model.id)) return undefined;
     if (ALIAS_DUPLICATE_IDS.has(model.id)) return undefined;
@@ -1069,6 +1136,7 @@ export const aimlapi = {
 
     return {
       id: model.id,
+      header: wireHeader(model.id, reasoningOptions),
       model: factorBaseModel(
         base,
         {

@@ -1,3 +1,5 @@
+# Effort names select the lab's thinking budget on this wire (low = 8192, medium = 32768
+# thinking_budget per the gateway's own 400 text); no separate toggle/budget field.
 base_model = "alibaba/qwen3.6-27b"
 
 [interleaved]

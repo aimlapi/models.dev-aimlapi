@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { labEffortValues, resolveLadder } from "../src/sync/providers/aimlapi.js";
+import { labEffortValues, labLadder, resolveLadder } from "../src/sync/providers/aimlapi.js";
 import { providerDirForMetadataLab } from "../src/sync/providers/openrouter.js";
 
 // The lookup that silently kept the host enum for every GLM id: `base_model`
@@ -73,8 +73,25 @@ test("an empty intersection is unresolved, not the host enum", () => {
   expect(resolveLadder("deepseek/deepseek-v4-pro", "deepseek/deepseek-v4-pro", ["low", "medium"])).toBeUndefined();
 });
 
-test("a base with no lab entry keeps the host enum — there is nothing to contradict", () => {
-  expect(resolveLadder("some/model", "nolab/nothing-here", ["low", "high"])).toEqual(["low", "high"]);
+test("a base with no lab entry falls back to the OpenRouter peer's ladder, intersected", () => {
+  // No `providers/tencent/models/hy3.toml`; OpenRouter lists none/low/high.
+  expect(labLadder("tencent/hy3")).toEqual({ kind: "effort", values: ["none", "low", "high"], source: "peer" });
+  expect(resolveLadder("tencent/hy3", "tencent/hy3", ["low", "medium", "high"])).toEqual(["low", "high"]);
+  // A peer-listed `none` is not taken on trust the way a lab-listed one is.
+  expect(resolveLadder("tencent/hy3", "tencent/hy3", ["none", "low", "medium", "high"])).toEqual(["low", "high"]);
+  // OpenRouter files Alibaba under `qwen/`.
+  expect(labLadder("alibaba/qwen3.8-27b")).toEqual({ kind: "effort", values: ["low", "medium", "xhigh"], source: "peer" });
+});
+
+test("a peer that is toggle-only counts as no effort ladder, not as a licence for the host enum", () => {
+  // No lab entry for Opus 4.1; OpenRouter's card is toggle-only.
+  expect(labLadder("anthropic/claude-opus-4.1")).toEqual({ kind: "no-effort", source: "peer" });
+  expect(resolveLadder("anthropic/claude-opus-4.1", "anthropic/claude-opus-4.1", ["low", "medium", "high"])).toBeUndefined();
+});
+
+test("a base with neither a lab nor a peer entry is unresolved, not the host enum", () => {
+  expect(labLadder("nolab/nothing-here")).toEqual({ kind: "no-entry" });
+  expect(resolveLadder("some/model", "nolab/nothing-here", ["low", "high"])).toBeUndefined();
 });
 
 test("a wire alias resolves through the measurements of the id it answers as", () => {

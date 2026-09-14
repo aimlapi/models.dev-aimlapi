@@ -1,3 +1,5 @@
+# No caller control: reasoning_effort is validated (invalid value -> 400) but low/high
+# do not order reasoning tokens; toggle/budget fields are dropped by the gateway.
 base_model = "zhipuai/glm-4.7-flash"
 name = "GLM 4.7 Flash"
 reasoning_options = []

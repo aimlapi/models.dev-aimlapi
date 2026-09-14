@@ -1,3 +1,4 @@
+# Off: reasoning_effort = none (0 reasoning tokens); no toggle field on this surface.
 base_model = "anthropic/claude-opus-4-7"
 name = "Claude 4.7 Opus"
 

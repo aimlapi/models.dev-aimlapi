@@ -68,6 +68,19 @@ export function providerDirForMetadataLab(metadata: string): string {
   return metadata;
 }
 
+/**
+ * The OpenRouter model-directory prefixes that carry a metadata lab, in table
+ * order — e.g. `alibaba` lives under both `alibaba/` and `qwen/` on OpenRouter,
+ * and only the latter is populated.
+ */
+export function openrouterDirsForMetadataLab(metadata: string): string[] {
+  const dirs: string[] = [];
+  for (const [prefix, entry] of Object.entries(CANONICAL_PROVIDER_PREFIXES)) {
+    if (entry.metadata === metadata) dirs.push(prefix);
+  }
+  return dirs.length > 0 ? dirs : [metadata];
+}
+
 export const OpenRouterModel = z.object({
   id: z.string(),
   name: z.string(),
