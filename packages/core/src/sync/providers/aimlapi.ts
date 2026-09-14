@@ -694,7 +694,14 @@ export function labLadder(baseModelID: string): LabLadder {
   // directory, and for `zhipuai` -> `zai`, `meta` -> `llama` those differ.
   // The first version of this lookup assumed they matched and silently kept
   // the host enum for every GLM id — the review caught it from the TOMLs.
-  const lab = providerDirForMetadataLab(baseModelID.slice(0, slash));
+  // The mapping is not one-to-one either: Meta's Llama cards live under
+  // `llama/` but its Muse cards under `meta/`, so both the mapped directory
+  // and the lab's own name are tried, and the lookup that assumed one
+  // directory per lab was the second silent miss of the same kind.
+  const metadataLab = baseModelID.slice(0, slash);
+  const labDirs = [providerDirForMetadataLab(metadataLab), metadataLab].filter(
+    (dir, index, all) => all.indexOf(dir) === index,
+  );
   const name = baseModelID.slice(slash + 1);
   // A dated snapshot (`deepseek-v4-pro-0813`) has no lab entry of its own and
   // is the same control surface as the model it snapshots, so it borrows that
@@ -703,8 +710,10 @@ export function labLadder(baseModelID: string): LabLadder {
   const candidates = [name, name.replace(/-\d{4}$/, "")].filter(
     (candidate, index, all) => all.indexOf(candidate) === index,
   );
-  const own = readLadder(lab, candidates, "lab");
-  if (own.kind !== "no-entry") return own;
+  for (const labDir of labDirs) {
+    const own = readLadder(labDir, candidates, "lab");
+    if (own.kind !== "no-entry") return own;
+  }
   // No first-party entry. The next-best baseline is an established peer on
   // the same surface: OpenRouter's card for the same lab id, which the review
   // names as the reference whenever the lab is silent. Its ladder is used
@@ -712,7 +721,6 @@ export function labLadder(baseModelID: string): LabLadder {
   // toggle-only cards count as "no effort ladder" just as a lab's would.
   // OpenRouter files Alibaba under `qwen/`, so every directory it uses for
   // the lab is tried. Only when neither exists is the model unresolved.
-  const metadataLab = baseModelID.slice(0, slash);
   const peerPaths = openrouterDirsForMetadataLab(metadataLab).flatMap((dir) =>
     candidates.map((candidate) => `${dir}/${candidate}`),
   );

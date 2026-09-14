@@ -8,9 +8,23 @@ import { providerDirForMetadataLab } from "../src/sync/providers/openrouter.js";
 // for these two they differ.
 test("maps a metadata lab to its first-party provider directory", () => {
   expect(providerDirForMetadataLab("zhipuai")).toBe("zai");
-  expect(providerDirForMetadataLab("meta")).toBe("llama");
   expect(providerDirForMetadataLab("deepseek")).toBe("deepseek");
   expect(providerDirForMetadataLab("no-such-lab")).toBe("no-such-lab");
+});
+
+test("a lab split across two provider directories is read from both", () => {
+  // Meta's Llama cards live under `llama/`, its Muse cards under `meta/`.
+  expect(providerDirForMetadataLab("meta")).toBe("llama");
+  expect(labLadder("meta/muse-spark-1.1")).toEqual({
+    kind: "effort",
+    values: ["minimal", "low", "medium", "high", "xhigh"],
+    source: "lab",
+  });
+  expect(resolveLadder("meta/muse-spark-1.1", "meta/muse-spark-1.1", ["low", "medium", "high"])).toEqual([
+    "low",
+    "medium",
+    "high",
+  ]);
 });
 
 test("reads the lab ladder through the provider directory, not the model record", () => {
