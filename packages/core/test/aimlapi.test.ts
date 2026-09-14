@@ -42,7 +42,7 @@ test("intersects the host enum with the lab ladder and drops the rest", () => {
 test("`none` survives only where measured as a real off switch", () => {
   // Same lab, same host enum; only the measurement differs.
   expect(resolveLadder("deepseek/deepseek-v4-pro", "deepseek/deepseek-v4-pro", HOST)).toContain("none");
-  expect(resolveLadder("alibaba/qwen3.7-max", "alibaba/qwen3.7-max", HOST)).not.toContain("none");
+  expect(resolveLadder("deepseek/deepseek-v4-flash", "deepseek/deepseek-v4-flash", HOST)).toContain("none");
 });
 
 test("`none` is kept where the lab itself lists it", () => {
@@ -60,12 +60,13 @@ test("a measurement narrows but never widens past the lab", () => {
 // or the model is unresolved.
 test("a toggle-only lab base never yields the host's effort dump", () => {
   const host = ["none", "minimal", "low", "medium", "high"];
-  // glm-4.5v: lab toggle-only, not in HOST_EFFORT_LIVE -> unresolved.
+  // glm-4.5v: lab toggle-only -> unresolved.
   expect(resolveLadder("z-ai/glm-4.5v", "zhipuai/glm-4.5v", host)).toBeUndefined();
-  // qwen3.7-max: lab toggle+budget, but its `low`/`medium` map onto the lab's
-  // own budget tiers on this host -> the host enum is a live control, minus
-  // the unmeasured `none`.
-  expect(resolveLadder("alibaba/qwen3.7-max", "alibaba/qwen3.7-max", host)).toEqual(["minimal", "low", "medium", "high"]);
+  // qwen3.7-max: lab toggle+budget. The host's effort field measured live
+  // (its names select the budget tiers), and it is still unresolved: a
+  // toggle/budget baseline has no effort ladder to intersect with.
+  expect(resolveLadder("alibaba/qwen3.7-max", "alibaba/qwen3.7-max", host)).toBeUndefined();
+  expect(resolveLadder("google/gemini-2.5-flash-lite", "google/gemini-2.5-flash-lite", host)).toBeUndefined();
 });
 
 test("an empty intersection is unresolved, not the host enum", () => {

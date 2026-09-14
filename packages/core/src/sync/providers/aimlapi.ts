@@ -756,28 +756,27 @@ function readLadder(providerDir: string, modelPaths: readonly string[], source: 
  */
 
 /**
- * Ids whose lab entry has reasoning options but NO effort ladder — toggle or
- * budget only — and whose `reasoning_effort` on this host was measured to be
- * a live control anyway. The intersection has nothing to intersect with here,
- * so this list is what stands between "the host's enum" and "an invented
- * ladder": an id is on it only with an invalid value rejected AND either an
- * ordering or a mapping onto the lab's own control.
+ * Toggle- or budget-only labs whose `reasoning_effort` on this host was
+ * nonetheless measured to be live, recorded so the decision not to publish
+ * them can be revisited with the evidence in hand:
  *
  *   gemini-2.5-flash-lite    low 863 -> high 2399 reasoning tokens
  *   qwen3.6-27b, qwen3.7-max, qwen3.6-35b-a3b
- *                            `low`/`medium` map onto the lab's thinking
- *                            budget: the gateway answers "must be greater than
+ *                            `low`/`medium` select the lab's thinking budget:
+ *                            the gateway answers "must be greater than
  *                            thinking_budget [8192]" / "[32768]" when
- *                            max_tokens is below them. That reads like a
- *                            refused rung and is the opposite — the effort
- *                            name IS the budget tier, which is the lab's own
- *                            control under the host's spelling.
+ *                            max_tokens is below them.
  *
- * Everything else with a toggle-only lab was measured on repeats and did not
- * order; those are in `EFFORT_VALIDATED_BUT_INERT` and publish `[]`. Nothing
- * with a toggle-only lab is left on the host's enum without a probe behind it.
+ * They are NOT published. The baseline rule is lab ∩ host, and a lab that
+ * lists only a toggle or a budget has no effort ladder to intersect with; an
+ * effort list here would be the host's control family under a name the lab
+ * and its peers (OpenRouter: toggle only) do not use. The review held that
+ * line across several rounds and it is the line this file follows: these
+ * four reasoners are unresolved and skipped until either the lab publishes
+ * an effort ladder or this host exposes the budget itself. The measurements
+ * above stay so nobody reads the skip as a finding that the field did nothing.
  */
-const HOST_EFFORT_LIVE: ReadonlySet<string> = new Set([
+export const HOST_EFFORT_MEASURED_BUT_UNPUBLISHED: ReadonlySet<string> = new Set([
   "google/gemini-2.5-flash-lite",
   "alibaba/qwen3.6-27b",
   "alibaba/qwen3.7-max",
@@ -915,15 +914,14 @@ export function resolveLadder(id: string, base: string, host: readonly string[])
       break;
     }
     case "no-effort":
-      // The lab has spoken and said "toggle / budget, no effort ladder". A
-      // host effort enum contradicts that, so it ships only where a probe
-      // showed the host's field is a live, host-native control — measured
-      // ordering, or a mapping onto the lab's own budget tiers. Otherwise the
-      // model is skipped: `[]` would claim no control, which the validated
-      // field rules out, and the enum would claim a family the lab denies.
-      if (!HOST_EFFORT_LIVE.has(id)) return undefined;
-      values = [...host];
-      break;
+      // The lab (or, failing it, the peer) has spoken and said "toggle /
+      // budget, no effort ladder". There is nothing to intersect with, and a
+      // host effort enum would claim a control family the baseline denies —
+      // even where the field measured live (see
+      // HOST_EFFORT_MEASURED_BUT_UNPUBLISHED). `[]` would claim no control,
+      // which a validated field rules out. So the model is unresolved and
+      // skipped.
+      return undefined;
     case "no-entry":
       // Neither the lab nor the peer publishes a ladder for this model, so
       // there is nothing to intersect with and the host's enum would ship as
@@ -1008,19 +1006,6 @@ function wireHeader(id: string, reasoningOptions: Array<{ type: "effort"; values
       EFFORT_NOT_HONOURED.has(measuredId)
         ? "# and toggle/budget fields are dropped by the gateway (unknown top-level keys -> 200)."
         : "# do not order reasoning tokens; toggle/budget fields are dropped by the gateway.",
-    );
-  }
-  if (HOST_EFFORT_LIVE.has(measuredId)) {
-    lines.push(
-      ...(measuredId.startsWith("alibaba/")
-        ? [
-            "# Effort names select the lab's thinking budget on this wire (low = 8192, medium = 32768",
-            "# thinking_budget per the gateway's own 400 text); no separate toggle/budget field.",
-          ]
-        : [
-            "# Effort orders reasoning tokens on this wire (low 863 -> high 2399 measured);",
-            "# no separate toggle/budget field, unknown top-level keys are dropped.",
-          ]),
     );
   }
   if (NONE_IS_REAL_OFF.has(measuredId)) {
